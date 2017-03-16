@@ -21,20 +21,12 @@
 %% @doc
 %% When an http listener is configured for api_server, and a request arrives,
 %% init/2 is called
-%% - if the header "authorization" is present, api_server_login is called,
-%%   and the 'user' field is populated if valid
-%% - if the body is present, and size is correct, is captured and the if JSON, decoded
-%% - incoming/3 is called
-%%
-%% By default:
-%% - If an authenticated POST is received for "/", is is managed as an API call
-%% - If an authenticated POST to /upload/name 
-%% - Otherwhise, api_server_http_get or api_server_http_post are invoked
-
-
+%% - callback api_server_http_auth is called to check authentication
+%% - callback api_server_http is called to process the message
 
 -module(nkapi_server_http).
--export([get_body/2, get_qs/1, get_ct/1, get_user/1]).
+-export([filename_encode/3, filename_decode/1]).
+-export([get_body/2, get_qs/1, get_ct/1, get_basic_auth/1]).
 -export([init/2, terminate/3]).
 -export_type([reply/0, method/0, code/0, path/0, http_qs/0]).
 
@@ -53,7 +45,7 @@
 
 -define(LLOG(Type, Txt, Args, State),
     lager:Type("NkAPI API Server HTTP (~s, ~s) "++Txt, 
-               [State#state.user, State#state.id|Args])).
+               [State#state.user, State#state.session_id|Args])).
 
 
 
@@ -63,17 +55,15 @@
 
 
 -record(state, {
-    id :: binary(),
     srv_id :: nkapi:id(),
-    session_type :: atom(),
-    remote :: binary(),
-    user :: binary(),
-    user_meta = #{} :: map(),
-    user_state :: map(),
+    user = <<>> :: binary(),
+    user_token = <<>> :: binary(),
+    session_id :: binary(),
     req :: term(),
     method :: binary(),
     path :: [binary()],
-    ct :: binary()
+    ct :: binary(),
+    user_state :: nkapi:user_state()
 }).
 
 
@@ -85,7 +75,7 @@
 
 -type body() ::  Body::binary()|map().
 
--type state() :: map().
+-type state() :: nkapi_server:user_state().
 
 -type reply() ::
     {ok, Reply::map(), state()} |
@@ -104,6 +94,30 @@
 %% ===================================================================
 %% Public
 %% ===================================================================
+
+%% @doc
+-spec filename_encode(Module::atom(), ObjId::binary(), Name::binary()) ->
+    binary().
+
+filename_encode(Module, ObjId, Name) when is_atom(Module) ->
+    ObjId2 = to_bin(ObjId),
+    Name2 = to_bin(Name),
+    Term = term_to_binary({Module, ObjId2, Name2}),
+    nklib_util:base64url_encode(Term).
+
+
+%% @doc
+-spec filename_decode(binary()|string()) ->
+    {Module::atom(), Id::term(), Name::term()} | error.
+
+filename_decode(Term) ->
+    try
+        Bin = nklib_util:base64url_decode(Term),
+        {_Module, _ObjId, _Name} = binary_to_term(Bin)
+    catch
+        error:_ -> error
+    end.
+
 
 %% @doc
 -spec get_body(req(), #{max_size=>integer(), parse=>boolean()}) ->
@@ -152,12 +166,16 @@ get_ct(#state{ct=CT}) ->
 
 
 %% @doc
--spec get_user(req()) ->
-    {binary(), map()}.
+-spec get_basic_auth(req()) ->
+    {user, binary(), binary()} | undefined.
 
-get_user(#state{user=User, user_meta=Meta}) ->
-    {User, Meta}.
-
+get_basic_auth(#state{req=Req}) ->
+    case cowboy_req:parse_header(<<"authorization">>, Req) of
+        {basic, User, Pass} ->
+            {basic, User, Pass};
+        _ ->
+            undefined
+    end.
 
 
 %% ===================================================================
@@ -170,7 +188,7 @@ init(Req, [{srv_id, SrvId}]) ->
     {Ip, Port} = cowboy_req:peer(Req),
     Remote = <<
         (nklib_util:to_host(Ip))/binary, ":",
-        (nklib_util:to_binary(Port))/binary
+        (to_bin(Port))/binary
     >>,
     SessId = nklib_util:luid(),
     Method = case cowboy_req:method(Req) of
@@ -185,29 +203,27 @@ init(Req, [{srv_id, SrvId}]) ->
         [<<>>|Rest] -> Rest;
         Rest -> Rest
     end,
-    UserState = #{srv_id=>SrvId, id=>SessId, remote=>Remote},
+    UserState = #{
+        srv_id => SrvId,
+        session_type => ?MODULE,
+        session_id => SessId,
+        remote => Remote
+    },
     State1 = #state{
-        id = SessId,
-        srv_id = SrvId, 
-        session_type = ?MODULE,
-        remote = Remote,
+        srv_id = SrvId,
+        session_id = SessId,
         user = <<>>,
-        user_state = UserState,
         req = Req,
         method = Method,
         path = Path,
-        ct = cowboy_req:header(<<"content-type">>, Req)
+        ct = cowboy_req:header(<<"content-type">>, Req),
+        user_state = UserState
     },
     set_log(State1),
     ?DEBUG("received ~p (~p) from ~s", [Method, Path, Remote], State1),
     try
         State2 = auth(State1),
-        Reply = case {Method, Path} of
-            {post, [<<"rpc">>]} ->
-                {rpc, State2};
-            _ ->
-                handle(api_server_http, [Method, Path, State2], State2)
-        end,
+        Reply = handle(api_server_http, [Method, Path], State2),
         process(Reply)
     catch
         throw:{Code, Hds, Body} ->
@@ -237,23 +253,27 @@ set_log(#state{srv_id=SrvId}=State) ->
 
 
 %% @private
-auth(#state{req=Req, remote=Remote}=State) ->
-    case cowboy_req:parse_header(<<"authorization">>, Req) of
-        {basic, User, Pass} ->
-            Data = #{module=>?MODULE, user=>User, password=>Pass},
-            % We do the same as nkapi_api:cmd(user, login, _),
-            case handle(api_server_login, [Data], State) of
-                {true, User2, Meta, State2} ->
-                    State3 = State2#state{user=User2, user_meta=Meta},
-                    ?LLOG(info, "user authenticated (~s)", [Remote], State3),
-                    State3;
-                {false, _State2} ->
-                    ?LLOG(info, "user forbidden (~s)", [Remote], State),
-                    throw({403, [], <<"Forbidden">>})
-            end;
-        _Other ->
-            State
+auth(#state{user_state=#{remote:=Remote}=UserState} = State) ->
+    case handle(api_server_http_auth, [], State) of
+        {true, User, Meta, State2} when is_map(Meta) ->
+            User2 = to_bin(User),
+            #state{user_state=UserState} = State,
+            UserState2 = UserState#{user=>User2, user_meta=>Meta},
+            State3 = State2#state{user=User2, user_state=UserState2},
+            ?LLOG(info, "user authenticated (~s)", [Remote], State3),
+            State3;
+        {token, User, Meta, Token, State2} ->
+            User2 = to_bin(User),
+            #state{user_state=UserState} = State,
+            UserState2 = UserState#{user=>User2, user_meta=>Meta},
+            State3 = State2#state{user=User2, user_token=Token, user_state=UserState2},
+            ?LLOG(info, "user authenticated (~s)", [Remote], State3),
+            State3;
+        {false, _State2} ->
+            ?LLOG(info, "user forbidden (~s)", [Remote], State),
+            throw({403, [], <<"Forbidden">>})
     end.
+
 
 %% @private
 process({ok, Reply, State}) ->
@@ -262,17 +282,11 @@ process({ok, Reply, State}) ->
 process({error, Error, State}) ->
     send_msg_error(Error, State);
 
-process({http_ok, State}) ->
-    send_http_reply(200, [], <<>>, State);
-
-% process({http_error, Error, State}) ->
-%     send_http_error(Error, State);
-
 process({http, Code, Hds, Body, State}) ->
     send_http_reply(Code, Hds, Body, State);
 
 process({rpc, State}) ->
-    #state{srv_id=SrvId, user=User, id=SessId, user_state=UserState} = State,
+    #state{srv_id=SrvId, user=User, session_id=SessId, user_state=UserState} = State,
     case get_body(State, #{max_size=>100000, parse=>true}) of
         #{<<"class">>:=Class, <<"cmd">>:=Cmd} = Body ->
             TId = erlang:phash2(make_ref()),
@@ -337,7 +351,6 @@ send_msg_error(Error, #state{srv_id=SrvId}=State) ->
     send_http_reply(200, [], Msg, State).
 
 
-
 %% @private
 send_http_reply(Code, Hds, Body, #state{req=Req}) ->
     {Hds2, Body2} = case is_map(Body) of
@@ -349,45 +362,15 @@ send_http_reply(Code, Hds, Body, #state{req=Req}) ->
         false -> 
             {
                 Hds,
-                nklib_util:to_binary(Body)
+                to_bin(Body)
             }
     end,
     {ok, cowboy_req:reply(Code, Hds2, Body2, Req), []}.
 
 
-% %% @private
-% send_http_error(Error, #state{srv_id=SrvId}=State) ->
-%     {Code, Hds, Body} = case Error of
-%         unauthorized ->
-%             ?LLOG(info, "missing authorization", [], State),
-%             Hds0 = [{<<"www-authenticate">>, <<"Basic realm=\"netcomposer\"">>}],
-%             {401, Hds0, <<>>};
-%         invalid_request ->
-%             {400, [], <<"Invalid Request">>};
-%         {invalid_request, Msg} ->
-%             {400, [], Msg};
-%         internal_error ->
-%             {500, [], <<"Internal Error">>};
-%         {internal_error, Msg} ->
-%             {500, [], Msg};
-%         invalid_json ->
-%             {400, [], <<"Invalid JSON">>};
-%         forbidden ->
-%             {403, [], <<"Forbidden">>};
-%         not_found ->
-%             {404, [], <<"Not found">>};
-%         body_too_large ->
-%             {400, [], <<"Body Too Large">>};
-%         _ ->
-%             {_Code, Text} = nkapi_util:error_code(SrvId, Error),
-%             {400, [], Text}
-%     end,
-%     send_http_reply(Code, Hds, Body, State).
-
-
-
 %% @private
 handle(Fun, Args, State) ->
-    nklib_gen_server:handle_any(Fun, Args, State, #state.srv_id, #state.user_state).
+    nklib_gen_server:handle_any(Fun, Args++[State], State, #state.srv_id, #state.user_state).
 
-
+%% @private
+to_bin(Term) -> nklib_util:to_binary(Term).

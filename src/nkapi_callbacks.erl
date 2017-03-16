@@ -24,8 +24,8 @@
 -export([plugin_deps/0, plugin_syntax/0, plugin_listen/2]).
 -export([api_error/2, api_error/1]).
 -export([api_server_init/2, api_server_terminate/2, 
-		 api_server_syntax/2, api_server_allow/2,
-		 api_server_cmd/2, api_server_http/4,
+		 api_server_syntax/2, api_server_allow/2, api_server_cmd/2,
+         api_server_http_auth/2, api_server_http/4,
 		 api_server_client_event/2, api_server_forward_event/2,
 		 api_server_reg_down/3,
 		 api_server_handle_call/3, api_server_handle_cast/2, 
@@ -215,11 +215,27 @@ api_server_cmd(#nkapi_req{class=Class, cmd=Cmd}=Req, State) ->
 
 
 %% @doc called when a new http request has been received
+-spec api_server_http_auth(http_req(), state()) ->
+    {true, User::binary(), Meta::map(), state()} | {false, state()}.
+
+api_server_http_auth(Req, State) ->
+    case nkapi_server_http:get_basic_auth(Req) of
+        {basic, _User, _Pass} ->
+            {false, State};
+        undefined ->
+            {false, State}
+    end.
+
+
+%% @doc called when a new http request has been received
 -spec api_server_http(http_method(), http_path(), http_req(), state()) ->
     http_reply().
 
+api_server_http(post, [<<"api">>], _Req, State) ->
+    {rpc, State};
+
 api_server_http(_Method, _Path, _Req, State) ->
-    lager:error("HTTP: ~p", [_Path]),
+    lager:info("NkAPI HTTP path not found: ~p", [_Path]),
     {http, 404, [], <<"Not Found">>, State}.
 
 
@@ -233,7 +249,7 @@ api_server_client_event(Event, State) ->
 	
 
 %% @doc Called when the API server receives an event notification from 
-%% nkservice_events (becase we are subscribed to it).
+%% nkservice_events (because we are subscribed to it).
 %% We can send it to the remote side or ignore it.
 -spec api_server_forward_event(nkservice_events:event(), state()) ->
 	{ok, nkservice_events:event(), continue()} |

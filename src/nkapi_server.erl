@@ -79,7 +79,9 @@
         session_type => atom(),
         session_id => binary(),
         remote => binary(),
-        term() => term()
+        user => binary(),           % not present if not authenticated
+        user_meta => map(),         % "
+        module() => term()
     }.
 
 
@@ -755,7 +757,7 @@ parse_event(Data) ->
 %% @private
 process_login(Reply, User, Meta, ReqOrTid, NkPort, State) ->
     #state{srv_id=SrvId, session_id=SessId, user_state=UserState} = State,
-    UserState2 = UserState#{user=>User, user_meta=>Meta, session_id=>SessId},
+    UserState2 = UserState#{user=>User, user_meta=>Meta},
     State2 = State#state{user_state=UserState2, user=User},
     nklib_proc:put(?MODULE, {User, SessId}),
     nklib_proc:put({?MODULE, SrvId}, {User, SessId}),

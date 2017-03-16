@@ -161,6 +161,7 @@ send_unrecognized_fields(Req, Fields) ->
 
 
 %% @private
+%% TODO: if it is not a WS session, don't do this
 send_reply_event(Req, Type, Body) ->
     #nkapi_req{
         srv_id = SrvId,

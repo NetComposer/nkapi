@@ -25,6 +25,7 @@
 -define(SRV, test).
 %%-define(WS, "ws://127.0.0.1:9202/apiws").
 -define(WS, "wss://127.0.0.1:9010/ws").
+-define(HTTP, "https://127.0.0.1:9010/rpc/api").
 
 -compile(export_all).
 
@@ -81,9 +82,15 @@ get_sessions(User) ->
 ping() ->
     cmd(session, ping, #{}).
 
+
+
+
 %% @doc
 event_get_subs() ->
     cmd(event, get_subscriptions, #{}).
+
+
+
 
 %% @doc
 event_subscribe() ->
@@ -157,18 +164,58 @@ session_call(SessId) ->
             #{session_id=>SessId, class=>class2, cmd=>cmd1, data=>#{k=>v}}),
     ok.
 
+
 test_async() ->
     {ok, #{<<"reply">> := #{<<"k">> := 1}}} =
         cmd(session, api_test_async, #{data=>#{k=>1}}).
 
-
 %% @doc
-session_log(Source, Msg, Data) ->
+log(Source, Msg, Data) ->
     cmd(session, log, Data#{source=>Source, message=>Msg}).
 
 
-http_async() ->
-    cmd_http(core, test, async, #{data=>#{a=>1}}).
+
+
+
+http_ping() ->
+    http_cmd(session, <<>>, ping, #{a=>1}).
+
+http_test_async() ->
+    {ok,
+        #{
+            <<"result">> := <<"ok">>,
+            <<"data">> := #{
+                <<"reply">> := #{<<"a">> := 1}}
+        }
+    } =
+        http_cmd(session, <<>>, api_test_async, #{data=>#{a=>1}}).
+
+
+http_session_call(SessId) ->
+    {ok,
+        #{
+            <<"result">> := <<"ok">>,
+            <<"data">> := #{<<"k">> := <<"v">>}
+        }
+    } =
+        http_cmd(session, <<>>, cmd,
+            #{session_id=>SessId, class=>class1, cmd=>cmd1, data=>#{k=>v}}),
+    {ok,
+        #{
+            <<"result">> := <<"error">>,
+            <<"data">> := #{
+                <<"code">> := <<"not_implemented">>,
+                <<"error">> :=<<"Not implemented">>
+            }
+        }
+    } =
+        http_cmd(session, <<>>, cmd,
+            #{session_id=>SessId, class=>class2, cmd=>cmd1, data=>#{k=>v}}),
+    ok.
+
+%% @doc
+http_log(Source, Msg, Data) ->
+    http_cmd(session, <<>>, log, Data#{source=>Source, message=>Msg}).
 
 
 upload(File) ->
@@ -217,10 +264,10 @@ event(Pid, Data) ->
 
 
 
-cmd_http(Class, Sub, Cmd, Data) ->
+http_cmd(Class, Sub, Cmd, Data) ->
     Opts = #{
-        user => <<"u1">>,
-        pass => <<"p1">>,
+        user => <<"user1">>,
+        pass => <<"1234">>,
         body => #{
             class => Class,
             subclass => Sub,
@@ -228,7 +275,7 @@ cmd_http(Class, Sub, Cmd, Data) ->
             data => Data
         }
     },
-    case nkapi_util:http(post, "https://127.0.0.1:9010/rpc", Opts) of
+    case nkapi_util:http(post, ?HTTP, Opts) of
         {ok, _Hds, Json, _Time} ->
             {ok, nklib_json:decode(Json)};
         {error, Error} ->
@@ -272,14 +319,6 @@ api_server_syntax(_Req, _S, _D, _M) ->
 api_server_allow(_Req, State) ->
     {true, State}.
 
-%%
-%%%% @doc Called on login
-%%api_server_login(#{user:=User, password:=<<"p1">>, meta:=Meta}, State) ->
-%%    {true, User, Meta, State};
-%%
-%%api_server_login(_Data, _State) ->
-%%    continue.
-
 
 %% @doc Called on any command
 api_server_cmd(#nkapi_req{class=user, cmd=login, data=Data}, State) ->
@@ -293,6 +332,16 @@ api_server_cmd(#nkapi_req{class=user, cmd=login, data=Data}, State) ->
 
 api_server_cmd(_Req, _State) ->
     continue.
+
+
+%% @doc
+api_server_http_auth(Req, State) ->
+    case nkapi_server_http:get_basic_auth(Req) of
+        {basic, User, <<"1234">>} ->
+            {true, User, #{data=>http}, State};
+        _ ->
+            continue
+    end.
 
 
 %% @private

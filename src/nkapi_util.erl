@@ -72,7 +72,7 @@ http(Method, Url, Opts) ->
         _ ->
             Headers2
     end,
-    Ciphers = ssl:cipher_suites(),
+%%    Ciphers = ssl:cipher_suites(),
     % Hackney fails with its default set of ciphers
     % See hackney.ssl#44
     HttpOpts = [
@@ -80,8 +80,8 @@ http(Method, Url, Opts) ->
         {recv_timeout, ?HTTP_RECV_TIMEOUT},
         insecure,
         with_body,
-        {pool, default},
-        {ssl_options, [{ciphers, Ciphers}]}
+        {pool, default}
+%%        {ssl_options, [{ciphers, Ciphers}]}
     ],
     Start = nklib_util:l_timestamp(),
     Url2 = list_to_binary([Url]),
