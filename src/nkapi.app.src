@@ -1,0 +1,13 @@
+{application, nkapi, [
+    {description, "NetComposer API Server"},
+    {vsn, "develop"},
+    {modules, []},
+    {registered, []},
+    {mod, {nkapi_app, []}},
+    {applications, [
+        nkpacket,
+        nkservice
+    ]},
+    {env, [
+    ]}
+]}.
