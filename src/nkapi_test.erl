@@ -43,7 +43,10 @@ start() ->
         api_server_timeout => 300,
         debug => [nkapi_client, nkapi_server, nkservice_events],
         plugins => [nkapi_log_gelf],
-        api_gelf_server => "c2.netc.io"
+        api_gelf_server => "c2.netc.io",
+        % To test nkpacket config:
+        tls_password => <<"1234">>,
+        packet_no_dns_cache => false
     },
     nkservice:start(test, Spec).
 

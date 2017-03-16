@@ -23,7 +23,7 @@
 
 -export([http/3, http_upload/7, http_download/6]).
 -export([api_error/2]).
--export([get_web_servers/3, get_api_webs/3, get_api_sockets/4]).
+-export([get_web_servers/3, get_api_webs/3, get_api_sockets/3]).
 -export([parse_api_server/3, parse_web_server/3]).
 
 -include_lib("nkpacket/include/nkpacket.hrl").
@@ -183,7 +183,8 @@ get_web_servers(SrvId, List, Config) ->
             Priv = list_to_binary(code:priv_dir(nkapi)),
             <<Priv/binary, "/www">>
     end,
-    WebOpts2 = #{
+    NetOpts = nkpacket_util:get_plugin_net_opts(Config),
+    WebOpts2 = NetOpts#{
         class => {nkapi_web_server, SrvId},
         http_proto => {static, #{path=>WebPath, index_file=><<"index.html">>}}
     },
@@ -192,10 +193,15 @@ get_web_servers(SrvId, List, Config) ->
 
 
 %% @private
-get_api_webs(_SrvId, [], Acc) ->
+get_api_webs(SrvId, ApiSrv, Config) ->
+    get_api_webs(SrvId, ApiSrv, Config, []).
+
+
+%% @private
+get_api_webs(_SrvId, [], _Config, Acc) ->
     Acc;
 
-get_api_webs(SrvId, [{List, Opts}|Rest], Acc) ->
+get_api_webs(SrvId, [{List, Opts}|Rest], Config, Acc) ->
     List2 = [
         {nkpacket_protocol_http, Proto, Ip, Port}
         ||
@@ -213,17 +219,23 @@ get_api_webs(SrvId, [{List, Opts}|Rest], Acc) ->
             end,
             CowPath = Path2 ++ "/[...]",
             Routes = [{'_', [{CowPath, nkapi_server_http, [{srv_id, SrvId}]}]}],
-            Opts2 = #{
+            NetOpts = nkpacket_util:get_plugin_net_opts(Config),
+            Opts2 = NetOpts#{
                 class => {nkapi_server, SrvId},
                 http_proto => {dispatch, #{routes => Routes}}
             },
             [{List2, Opts2}|Acc]
     end,
-    get_api_webs(SrvId, Rest, Acc2).
+    get_api_webs(SrvId, Rest, Config, Acc2).
 
 
 %% @private
-get_api_sockets(_SrvId,[], _Config, Acc) ->
+get_api_sockets(SrvId, ApiSrv, Config) ->
+    get_api_sockets(SrvId, ApiSrv, Config, []).
+
+
+%% @private
+get_api_sockets(_SrvId, [], _Config, Acc) ->
     Acc;
 
 get_api_sockets(SrvId, [{List, Opts}|Rest], Config, Acc) ->
@@ -234,7 +246,8 @@ get_api_sockets(SrvId, [{List, Opts}|Rest], Config, Acc) ->
         Proto==ws orelse Proto==wss orelse Proto==tcp orelse Proto==tls
     ],
     Timeout = maps:get(api_server_tiemout, Config, 180),
-    Opts2 = #{
+    NetOpts = nkpacket_util:get_plugin_net_opts(Config),
+    Opts2 = NetOpts#{
         path => maps:get(path, Opts, <<"/">>),
         class => {nkapi_server, SrvId},
         get_headers => [<<"user-agent">>],

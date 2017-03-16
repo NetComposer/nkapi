@@ -21,8 +21,7 @@
 %% @doc Default callbacks
 -module(nkapi_callbacks).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
--export([plugin_deps/0, plugin_syntax/0, plugin_config/2,
-		 plugin_listen/2]).
+-export([plugin_deps/0, plugin_syntax/0, plugin_listen/2]).
 -export([api_error/2, api_error/1]).
 -export([api_server_init/2, api_server_terminate/2, 
 		 api_server_syntax/2, api_server_allow/2,
@@ -59,34 +58,12 @@ plugin_deps() ->
 	nklib_config:syntax().
 
 plugin_syntax() ->
-    #{
+    nkpacket_util:get_plugin_net_syntax(#{
         api_server => fun nkapi_util:parse_api_server/3,
         api_server_timeout => {integer, 5, none},
         web_server => fun nkapi_util:parse_web_server/3,
-        web_server_path => binary,
-        ?TLS_SYNTAX
-    }.
-
-
-
-%% @doc This function can modify the service configuration, and can also
-%% generate a specific plugin configuration (in the second return), that will be 
-%% accessible in the generated module as config_(plugin_name).
--spec plugin_config(config(), nkservice:service()) ->
-	{ok, config()} | {ok, config(), term()} | {error, term()}.
-
-plugin_config(Config, _Service) ->
-    Keys = lists:filter(
-        fun(Key) ->
-            case atom_to_binary(Key, latin1) of
-                <<"tls_", _/binary>> -> true;
-                _ -> false
-            end
-        end,
-        maps:keys(plugin_syntax())),
-    NetOpts = maps:with(Keys, Config),
-    {ok, Config, #{net_opts=>NetOpts}}.
-
+        web_server_path => binary
+    }).
 
 
 %% @doc This function, if implemented, allows to add listening transports.
@@ -98,8 +75,8 @@ plugin_listen(Config, #{id:=SrvId}) ->
     {multi, WebSrv} = maps:get(web_server, Config, {multi, []}),
     WebSrvs = nkapi_util:get_web_servers(SrvId, WebSrv, Config),
     {multi, ApiSrv} = maps:get(api_server, Config, {multi, []}),
-    ApiSrvs1 = nkapi_util:get_api_webs(SrvId, ApiSrv, []),
-    ApiSrvs2 = nkapi_util:get_api_sockets(SrvId, ApiSrv, Config, []),
+    ApiSrvs1 = nkapi_util:get_api_webs(SrvId, ApiSrv, Config),
+    ApiSrvs2 = nkapi_util:get_api_sockets(SrvId, ApiSrv, Config),
     WebSrvs ++ ApiSrvs1 ++ ApiSrvs2.
 
 
