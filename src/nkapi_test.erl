@@ -308,10 +308,10 @@ api_client_fun(_Req, UserData) ->
 
 
 %% @doc
-api_server_syntax(#nkapi_req{class=test, data=_Data}, S, D, M) ->
-    {S#{num=>integer}, D, M};
+api_server_syntax(#nkapi_req{class=test, data=_Data}, Syntax, State) ->
+    {Syntax#{num=>integer}, State};
 
-api_server_syntax(_Req, _S, _D, _M) ->
+api_server_syntax(_Req, _Syntax, _State) ->
     continue.
 
 

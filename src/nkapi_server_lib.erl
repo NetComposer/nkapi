@@ -79,7 +79,7 @@
 process_req(Req, State) ->
     case make_req(Req) of
         #nkapi_req{srv_id=SrvId, user_id=_User, data=Data} = Req2 ->
-            Syntax = SrvId:api_server_syntax(Req2, #{}),
+            {Syntax, State2} = SrvId:api_server_syntax(Req2, #{}, State),
             ?DEBUG("parsing syntax ~p (~p)", [Data, Syntax], Req),
             case nklib_syntax:parse(Data, Syntax) of
                 {ok, Parsed, _Ext, Unrecognized} ->
@@ -88,20 +88,20 @@ process_req(Req, State) ->
                         _ -> send_unrecognized_fields(Req, Unrecognized)
                     end,
                     Req3 = Req2#nkapi_req{data=Parsed},
-                    case SrvId:api_server_allow(Req3, State) of
-                        {true, State2} ->
+                    case SrvId:api_server_allow(Req3, State2) of
+                        {true, State3} ->
                             ?DEBUG("request allowed", [], Req),
-                            SrvId:api_server_cmd(Req3, State2);
-                        {false, State2} ->
+                            SrvId:api_server_cmd(Req3, State3);
+                        {false, State3} ->
                             ?DEBUG("request NOT allowed", [], Req),
-                            {error, unauthorized, State2}
+                            {error, unauthorized, State3}
                     end;
                 {error, {syntax_error, Error}} ->
-                    {error, {syntax_error, Error}, State};
+                    {error, {syntax_error, Error}, State2};
                 {error, {missing_mandatory_field, Field}} ->
-                    {error, {missing_field, Field}, State};
+                    {error, {missing_field, Field}, State2};
                 {error, Error} ->
-                    {error, Error, State}
+                    {error, Error, State2}
             end;
         error ->
             ?LLOG(error, "set atoms error", [], Req),

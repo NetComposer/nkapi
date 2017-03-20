@@ -77,7 +77,7 @@ start(Srv, Url, Login, Fun, UserData) ->
     start(Srv, Url, Login, Fun, UserData, user).
 
     
-start(Srv, Url, #{user:=User}=Login, Fun, UserData, Class) ->
+start(Srv, Url, Login, Fun, UserData, Class) ->
     {ok, SrvId} = nkservice_srv:get_srv_id(Srv),
     Debug = case nkservice_util:get_debug_info(SrvId, ?MODULE) of
         {true, #{nkpacket:=true}} -> true;
@@ -88,7 +88,7 @@ start(Srv, Url, #{user:=User}=Login, Fun, UserData, Class) ->
         monitor => self(),
         connect_timeout => 60000,
         idle_timeout => ?WS_TIMEOUT,
-        user => {Fun, UserData#{user=>User}},
+        user => {Fun, UserData},
         implicit_scheme => nkapi_c,
         debug => Debug
     },

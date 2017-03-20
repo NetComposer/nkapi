@@ -1,10 +1,12 @@
--ifndef(NKAPU_HRL_).
--define(NKAPU_HRL_, 1).
+-ifndef(NKAPI_HRL_).
+-define(NKAPI_HRL_, 1).
 
 %% ===================================================================
 %% Defines
 %% ===================================================================
 
+
+-define(ADD_TO_API_SESSION(Key, Val, Session), Session#{Key=>Val}).
 
 
 

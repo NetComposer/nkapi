@@ -24,7 +24,7 @@
 -export([plugin_deps/0, plugin_syntax/0, plugin_listen/2]).
 -export([api_error/2, api_error/1]).
 -export([api_server_init/2, api_server_terminate/2, 
-		 api_server_syntax/2, api_server_allow/2, api_server_cmd/2,
+		 api_server_syntax/3, api_server_allow/2, api_server_cmd/2,
          api_server_http_auth/2, api_server_http/4,
 		 api_server_client_event/2, api_server_forward_event/2,
 		 api_server_reg_down/3,
@@ -110,6 +110,7 @@ api_error(SrvId, Error) ->
 
 api_error(already_authenticated)	-> "Already authenticated";
 api_error(already_uploaded)   		-> "Already uploaded";
+api_error(api_remove) 				-> "API remove received";
 api_error(api_stop) 				-> "API stop received";
 api_error(data_not_available)   	-> "Data is not available";
 api_error(duplicated_session_id)	-> "Duplicated session";
@@ -129,6 +130,7 @@ api_error(member_not_found)		    -> "Member not found";
 api_error(member_stop)				-> "Member stop";
 api_error({name_is_already_used, N})-> {"Name is already used: '~s'", [N]};
 api_error(no_usages)           		-> "No remaining usages";
+api_error(normal)           		-> "Normal termination";
 api_error(normal_termination) 		-> "Normal termination";
 api_error(not_authenticated)		-> "Not authenticated";
 api_error(not_found) 				-> "Not found";
@@ -181,11 +183,11 @@ api_server_init(_NkPort, State) ->
 
 %% @doc Called to get the syntax for an external API command
 %% Called from nkapi_server_lib
--spec api_server_syntax(#nkapi_req{}, nklib_syntax:syntax()) ->
-    nklib_syntax:syntax().
+-spec api_server_syntax(#nkapi_req{}, nklib_syntax:syntax(), state()) ->
+    {nklib_syntax:syntax(), state()}.
 
-api_server_syntax(#nkapi_req{class=Class, cmd=Cmd}, Syntax) ->
-    nkapi_syntax:syntax(Class, Cmd, Syntax).
+api_server_syntax(#nkapi_req{class=Class, cmd=Cmd}, Syntax, State) ->
+    {nkapi_syntax:syntax(Class, Cmd, Syntax), State}.
 
 
 %% @doc Called when a new API command has arrived and called nkapi_api:launch_cmd/6

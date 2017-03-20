@@ -48,10 +48,10 @@
     lager:Type(
         [
             {session_id, State#state.session_id},
-            {user_id, State#state.user}
+            {user_id, State#state.user_id}
         ],
         "NkAPI API Server ~s (~s) "++Txt, 
-        [State#state.session_id, State#state.user | Args])).
+        [State#state.session_id, State#state.user_id | Args])).
 
 -define(MSG(Txt, Args, State),
     case erlang:get(nkapi_server_debug) of
@@ -79,7 +79,7 @@
         session_type => atom(),
         session_id => binary(),
         remote => binary(),
-        user => binary(),           % not present if not authenticated
+        user_id => binary(),           % not present if not authenticated
         user_meta => map(),         % "
         module() => term()
     }.
@@ -344,7 +344,7 @@ do_register_http(SessId) ->
 
 -record(state, {
     srv_id :: nkapi:id(),
-    user = <<>> :: binary(),
+    user_id = <<>> :: binary(),
     session_id = <<>> :: binary(),
     trans = #{} :: #{tid() => #trans{}},
     tid = 1 :: integer(),
@@ -419,7 +419,7 @@ conn_parse({text, Text}, NkPort, State) ->
     case Msg of
         #{<<"class">> := Class, <<"cmd">> := Cmd, <<"tid">> := TId} ->
             ?MSG("received ~s", [Msg], State),
-            #state{srv_id=SrvId, user=User, session_id=Session} = State,
+            #state{srv_id=SrvId, user_id=User, session_id=Session} = State,
             Req = #nkapi_req{
                 srv_id = SrvId,
                 class = Class,
@@ -433,7 +433,7 @@ conn_parse({text, Text}, NkPort, State) ->
             process_client_req(Req, NkPort, State);
         #{<<"class">> := <<"event">>, <<"data">> := Data} ->
             ?MSG("received event ~s", [Data], State),
-            #state{srv_id=SrvId, user=User, session_id=Session} = State,
+            #state{srv_id=SrvId, user_id=User, session_id=Session} = State,
             Req = #nkapi_req{
                 srv_id = SrvId,
                 class = event,
@@ -531,7 +531,7 @@ conn_handle_cast({nkapi_reply_login, TId, Reply, User, Meta}, NkPort, State) ->
     case extract_op(TId, State) of
         {#trans{op=ack}, State2} ->
             case State of
-                #state{user = <<>>} ->
+                #state{user_id = <<>>} ->
                     process_login(Reply, User, Meta, TId, NkPort, State2);
                 _ ->
                     send_reply_error(already_authenticated, TId, NkPort, State2)
@@ -701,7 +701,7 @@ conn_stop(Reason, _NkPort, #state{trans=Trans}=State) ->
 %% ===================================================================
 
 %% @private
-process_client_req(Req, NkPort, #state{user=User, user_state=UserState} = State) ->
+process_client_req(Req, NkPort, #state{user_id=User, user_state=UserState} = State) ->
     case nkapi_server_lib:process_req(Req, UserState) of
         {ok, Reply, UserState2} ->
             State2 = State#state{user_state=UserState2},
@@ -757,8 +757,14 @@ parse_event(Data) ->
 %% @private
 process_login(Reply, User, Meta, ReqOrTid, NkPort, State) ->
     #state{srv_id=SrvId, session_id=SessId, user_state=UserState} = State,
-    UserState2 = UserState#{user=>User, user_meta=>Meta},
-    State2 = State#state{user_state=UserState2, user=User},
+    UserState2 = UserState#{
+        user_id => User,
+        user_meta => Meta
+    },
+    State2 = State#state{
+        user_id = User,
+        user_state = UserState2
+    },
     nklib_proc:put(?MODULE, {User, SessId}),
     nklib_proc:put({?MODULE, SrvId}, {User, SessId}),
     nklib_proc:put({?MODULE, user, User}, {SessId, Meta}),
