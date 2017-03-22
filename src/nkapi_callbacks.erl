@@ -110,7 +110,7 @@ api_error(SrvId, Error) ->
 
 api_error(already_authenticated)	-> "Already authenticated";
 api_error(already_uploaded)   		-> "Already uploaded";
-api_error(api_remove) 				-> "API remove received";
+api_error(api_delete) 				-> "API delete received";
 api_error(api_stop) 				-> "API stop received";
 api_error(data_not_available)   	-> "Data is not available";
 api_error(duplicated_session_id)	-> "Duplicated session";
