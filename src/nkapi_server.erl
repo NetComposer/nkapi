@@ -78,9 +78,10 @@
         srv_id => nkservice:id(),
         session_type => atom(),
         session_id => binary(),
-        remote => binary(),
-        user_id => binary(),           % not present if not authenticated
-        user_meta => map(),         % "
+        local => binary(),              % Transport:Ip:Port
+        remote => binary(),             % Transport:Ip:Port
+        user_id => binary(),            % not present if not authenticated
+        user_meta => map(),             % "
         module() => term()
     }.
 
@@ -378,12 +379,14 @@ default_port(https) -> 9011.
 
 conn_init(NkPort) ->
     {ok, {nkapi_server, SrvId}, _} = nkpacket:get_user(NkPort),
+    {ok, Local} = nkpacket:get_local_bin(NkPort),
     {ok, Remote} = nkpacket:get_remote_bin(NkPort),
     SessId = nklib_util:luid(),
     UserState = #{
         srv_id => SrvId, 
         session_type => ?MODULE,
         session_id => SessId,
+        local => Local,
         remote => Remote
     },
     true = nklib_proc:reg({?MODULE, session, SessId}, <<>>),
