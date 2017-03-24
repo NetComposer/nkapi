@@ -29,14 +29,6 @@
 %% ===================================================================
 
 %% @private
-syntax(user, login, Syntax) ->
-    S2 = Syntax#{
-        user => binary,
-        password => binary,
-        meta => map
-    },
-    nklib_syntax:add_mandatory([user, password], S2);
-
 syntax(event, subscribe, Syntax) ->
     S2 = events(Syntax),
     S2#{type=>[binary, {list, binary}]};

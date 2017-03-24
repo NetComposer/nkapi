@@ -22,7 +22,8 @@
 	data = #{} :: nkapi:data(),
 	tid :: term(),
 	user_id = <<>> :: binary(),
-	session_id = <<>> :: binary()
+	session_id = <<>> :: binary(),
+	module = undefined :: module() | undefined
 }).
 
 

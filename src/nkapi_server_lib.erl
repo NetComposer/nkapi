@@ -66,6 +66,11 @@
 %% Public
 %% ===================================================================
 
+
+%% ===================================================================
+%% Private
+%% ===================================================================
+
 %% @doc Starts the processing of an external API request
 %% It parses the request, getting the syntax calling SrvId:api_server_syntax()
 %% If it is valid, calls SrvId:api_server_allow() to authorized the request
@@ -79,7 +84,7 @@
 process_req(Req, State) ->
     case make_req(Req) of
         #nkapi_req{srv_id=SrvId, user_id=_User, data=Data} = Req2 ->
-            {Syntax, State2} = SrvId:api_server_syntax(Req2, #{}, State),
+            {Syntax, Req3, State2} = SrvId:api_server_syntax(#{}, Req2, State),
             ?DEBUG("parsing syntax ~p (~p)", [Data, Syntax], Req),
             case nklib_syntax:parse(Data, Syntax) of
                 {ok, Parsed, _Ext, Unrecognized} ->
@@ -87,11 +92,11 @@ process_req(Req, State) ->
                         [] -> ok;
                         _ -> send_unrecognized_fields(Req, Unrecognized)
                     end,
-                    Req3 = Req2#nkapi_req{data=Parsed},
-                    case SrvId:api_server_allow(Req3, State2) of
+                    Req4 = Req3#nkapi_req{data=Parsed},
+                    case SrvId:api_server_allow(Req4, State2) of
                         {true, State3} ->
                             ?DEBUG("request allowed", [], Req),
-                            SrvId:api_server_cmd(Req3, State3);
+                            SrvId:api_server_cmd(Req4, State3);
                         {false, State3} ->
                             ?DEBUG("request NOT allowed", [], Req),
                             {error, unauthorized, State3}

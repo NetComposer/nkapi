@@ -128,6 +128,7 @@ api_error(invalid_uri) 			    -> "Invalid Uri";
 api_error(invalid_object_id) 		-> "Invalid ObjectId";
 api_error(member_not_found)		    -> "Member not found";
 api_error(member_stop)				-> "Member stop";
+api_error(missing_id)				-> "Missing Id";
 api_error({name_is_already_used, N})-> {"Name is already used: '~s'", [N]};
 api_error(no_usages)           		-> "No remaining usages";
 api_error(normal)           		-> "Normal termination";
@@ -183,11 +184,11 @@ api_server_init(_NkPort, State) ->
 
 %% @doc Called to get the syntax for an external API command
 %% Called from nkapi_server_lib
--spec api_server_syntax(#nkapi_req{}, nklib_syntax:syntax(), state()) ->
-    {nklib_syntax:syntax(), state()}.
+-spec api_server_syntax(nklib_syntax:syntax(), #nkapi_req{}, state()) ->
+    {nklib_syntax:syntax(), #nkapi_req{}, state()}.
 
-api_server_syntax(#nkapi_req{class=Class, cmd=Cmd}, Syntax, State) ->
-    {nkapi_syntax:syntax(Class, Cmd, Syntax), State}.
+api_server_syntax(Syntax, #nkapi_req{class=Class, cmd=Cmd}=Req, State) ->
+    {nkapi_syntax:syntax(Class, Cmd, Syntax), Req, State}.
 
 
 %% @doc Called when a new API command has arrived and called nkapi_api:launch_cmd/6
