@@ -381,7 +381,7 @@ conn_init(NkPort) ->
     {ok, {nkapi_server, SrvId}, _} = nkpacket:get_user(NkPort),
     {ok, Local} = nkpacket:get_local_bin(NkPort),
     {ok, Remote} = nkpacket:get_remote_bin(NkPort),
-    SessId = nklib_util:luid(),
+    SessId = <<"session-", (nklib_util:luid())/binary>>,
     UserState = #{
         srv_id => SrvId, 
         session_type => ?MODULE,
