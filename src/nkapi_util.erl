@@ -139,6 +139,10 @@ api_error(SrvId, Error) ->
         continue ->
             % This error is not in any table, but it can be an already processed one
             case Error of
+                {exit, Exit} ->
+                    Ref = make_ref(),
+                    lager:notice("Internal API error ~p: ~p", [Ref, Exit]),
+                    {internal_error, get_error_fmt("Internal error '~p'", [Ref])};
                 {ErrCode, ErrReason} when is_binary(ErrCode), is_binary(ErrReason) ->
                     {ErrCode, ErrReason};
                 _ ->

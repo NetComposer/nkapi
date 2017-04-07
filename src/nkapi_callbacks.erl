@@ -150,7 +150,6 @@ api_error(unauthorized) 			-> "Unauthorized";
 api_error(unknown_peer) 			-> "Unknown peer";
 api_error(user_not_found)			-> "User not found";
 api_error(user_stop) 				-> "User stop";
-api_error({exit, _Exit}) 			-> "Internal error";
 api_error({internal_error, Ref})	-> {"Internal error: ~s", [Ref]};
 api_error({invalid_action, Txt})    -> {"Invalid action '~s'", [Txt]};
 api_error({invalid_state, St}) 	    -> {"Invalid state: ~s", [St]};
