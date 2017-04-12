@@ -673,7 +673,12 @@ conn_handle_info({'DOWN', Ref, process, _Pid, Reason}=Info, _NkPort, State) ->
         false ->
             case links_down(Ref, State) of
                 {ok, Link, State2} ->
-                    handle(api_server_reg_down, [Link, Reason], State2);
+                    case handle(api_server_reg_down, [Link, Reason], State2) of
+                        {ok, State3} ->
+                            {ok, State3};
+                        {stop, Reason2, State3} ->
+                            {stop, Reason2, State3}
+                    end;
                 not_found ->
                     handle(api_server_handle_info, [Info], State)
             end

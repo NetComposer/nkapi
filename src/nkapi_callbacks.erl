@@ -116,6 +116,10 @@ api_error(data_not_available)   	-> "Data is not available";
 api_error(duplicated_session_id)	-> "Duplicated session";
 api_error(file_read_error)   		-> "File read error";
 api_error(internal_error)			-> "Internal error";
+api_error({internal_error, Ref})	-> {"Internal error: ~s", [Ref]};
+api_error({invalid_action, Txt})    -> {"Invalid action '~s'", [Txt]};
+api_error({invalid_state, St}) 	    -> {"Invalid state: ~s", [St]};
+api_error({invalid_value, V}) 		-> {"Invalid value: '~s'", [V]};
 api_error(invalid_json) 			-> "Invalid JSON";
 api_error(invalid_operation) 		-> "Invalid operation";
 api_error(invalid_parameters) 		-> "Invalid parameters";
@@ -126,18 +130,14 @@ api_error(invalid_session_id)		-> "Invalid session";
 api_error(invalid_state) 			-> "Invalid state";
 api_error(invalid_uri) 			    -> "Invalid Uri";
 api_error(invalid_object_id) 		-> "Invalid ObjectId";
-api_error(member_not_found)		    -> "Member not found";
-api_error(member_stop)				-> "Member stop";
+api_error({missing_field, Txt})	    -> {"Missing field: '~s'", [Txt]};
 api_error(missing_id)				-> "Missing Id";
-api_error({name_is_already_used, N})-> {"Name is already used: '~s'", [N]};
 api_error(no_usages)           		-> "No remaining usages";
 api_error(normal)           		-> "Normal termination";
 api_error(normal_termination) 		-> "Normal termination";
 api_error(not_authenticated)		-> "Not authenticated";
 api_error(not_found) 				-> "Not found";
 api_error(not_implemented) 		    -> "Not implemented";
-api_error(object_not_found) 		-> "Object not found";
-api_error(object_already_exists)    -> "Object already exists";
 api_error(process_down)  			-> "Process failed";
 api_error(process_not_found) 		-> "Process not found";
 api_error(registered_down) 	        -> "Registered process stopped";
@@ -145,19 +145,15 @@ api_error(service_not_found) 		-> "Service not found";
 api_error(session_not_found) 		-> "Session not found";
 api_error(session_stop) 			-> "Session stop";
 api_error(session_timeout) 		    -> "Session timeout";
+api_error({syntax_error, Txt})		-> {"Syntax error: '~s'", [Txt]};
 api_error(timeout) 				    -> "Timeout";
 api_error(unauthorized) 			-> "Unauthorized";
-api_error(unknown_peer) 			-> "Unknown peer";
-api_error(user_not_found)			-> "User not found";
-api_error(user_stop) 				-> "User stop";
-api_error({internal_error, Ref})	-> {"Internal error: ~s", [Ref]};
-api_error({invalid_action, Txt})    -> {"Invalid action '~s'", [Txt]};
-api_error({invalid_state, St}) 	    -> {"Invalid state: ~s", [St]};
-api_error({invalid_value, V}) 		-> {"Invalid value: '~s'", [V]};
-api_error({missing_field, Txt})	    -> {"Missing field: '~s'", [Txt]};
-api_error({syntax_error, Txt})		-> {"Syntax error: '~s'", [Txt]};
 api_error({unknown_command, Txt})	-> {"Unknown command '~s'", [Txt]};
+api_error(unknown_peer) 			-> "Unknown peer";
+api_error(unknown_op)   			-> "Unknown operation";
+api_error(user_not_found)			-> "User not found";
 api_error({user_not_found, User})	-> {"User not found: '~s'", [User]};
+api_error(user_stop) 				-> "User stop";
 api_error(_)   		                -> continue.
 
 
@@ -268,7 +264,7 @@ api_server_forward_event(Event, State) ->
 
 %% @doc Called when the service process receives a registered process down
 -spec api_server_reg_down(nklib:link(), Reason::term(), state()) ->
-	{ok, state()} | continue().
+	{ok, state()} | {stop, Reason::term(), state()} | continue().
 
 api_server_reg_down(_Link, _Reason, State) ->
     {ok, State}.

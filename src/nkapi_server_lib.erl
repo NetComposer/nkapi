@@ -109,7 +109,7 @@ process_req(Req, State) ->
                     {error, Error, State2}
             end;
         error ->
-            ?LLOG(error, "set atoms error", [], Req),
+            ?LLOG(error, "set atoms error: ~p", [Req], Req),
             {error, not_implemented, State}
     end.
 
