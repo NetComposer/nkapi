@@ -113,6 +113,7 @@ api_error(already_uploaded)   		-> "Already uploaded";
 api_error(api_delete) 				-> "API delete received";
 api_error(api_stop) 				-> "API stop received";
 api_error(data_not_available)   	-> "Data is not available";
+api_error(destionation_not_found)   -> "Destination not found";
 api_error(duplicated_session_id)	-> "Duplicated session";
 api_error(file_read_error)   		-> "File read error";
 api_error(internal_error)			-> "Internal error";
