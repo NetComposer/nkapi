@@ -64,7 +64,7 @@
 -define(CALL_TIMEOUT, 180).     % Maximum sync call time
 
 -include("nkapi.hrl").
--include_lib("nkservice/include/nkservice.hrl").
+-include_lib("nkevent/include/nkevent.hrl").
 
 
 %% ===================================================================
@@ -111,13 +111,13 @@ cmd_async(Id, Class, SubClass, Cmd, Data) ->
 %% @doc Sends an event directly to the client (as it were subscribed)
 %% Response is not expected from remote
 %% Events can also be sent using class=event, cmd=send and a tid
--spec event(id(), map()|#event{}) ->
+-spec event(id(), map()|#nkevent{}) ->
     ok | {error, term()}.
 
-event(Id, Event) ->
-    case parse_event(Event) of
-        {ok, Event2} ->
-            do_cast(Id, {nkapi_send_event, Event2});
+event(Id, Data) ->
+    case nkevent_util:parse(Data) of
+        {ok, Event} ->
+            do_cast(Id, {nkapi_send_event, Event});
         {error, Error} ->
             {error, Error}
     end.
@@ -225,14 +225,12 @@ unregister(Id, Link) ->
 -spec subscribe(id(), nkapi:event()) ->
     ok.
 
-subscribe(Id, Event) ->
-    case parse_event(Event) of
-        {ok, #event{type=[F|_]=Types}=Event2} when not is_integer(F) ->
+subscribe(Id, Data) ->
+    case nkevent_util:parse_subs(Data) of
+        {ok, Events} ->
             lists:foreach(
-                fun(Type) -> subscribe(Id, Event2#event{type=Type}) end,
-                Types);
-        {ok, Event2} ->
-            do_cast(Id, {nkapi_subscribe, Event2});
+                fun(Event) -> do_cast(Id, {nkapi_subscribe, Event}) end,
+                Events);
         {error, Error} ->
             {error, Error}
     end.
@@ -242,21 +240,19 @@ subscribe(Id, Event) ->
 -spec unsubscribe(id(),  nkapi:event()) ->
     ok.
 
-unsubscribe(Id, Event) ->
-    case parse_event(Event) of
-        {ok, #event{type=[F|_]=Types}=Event2} when not is_integer(F) ->
+unsubscribe(Id, Data) ->
+    case nkevent_util:parse_subs(Data) of
+        {ok, Events} ->
             lists:foreach(
-                fun(Type) -> unsubscribe(Id, Event2#event{type=Type}) end,
-                Types);
-        {ok, Event2} ->
-            do_cast(Id, {nkapi_unsubscribe, Event2});
+                fun(Event) -> do_cast(Id, {nkapi_unsubscribe, Event}) end,
+                Events);
         {error, Error} ->
             {error, Error}
     end.
 
 
 %% @doc Unregisters with the Events system
--spec unsubscribe_fun(id(), fun((#event{}) -> boolean())) ->
+-spec unsubscribe_fun(id(), fun((#nkevent{}) -> boolean())) ->
     ok.
 
 unsubscribe_fun(Id, Fun) ->
@@ -339,7 +335,7 @@ do_register_http(SessId) ->
 
 -record(reg, {
     index :: integer(),
-    event :: #event{},
+    event :: #nkevent{},
     mon :: reference()
 }).
 
@@ -499,7 +495,7 @@ conn_handle_call({nkapi_send_req, Req}, From, NkPort, State) ->
     send_request(Req, From, NkPort, State);
     
 conn_handle_call(nkapi_get_subscriptions, From, _NkPort, #state{regs=Regs}=State) ->
-    Data = [nkservice_events:unparse(Event) || #reg{event=Event} <- Regs],
+    Data = [nkevent_util:unparse(Event) || #reg{event=Event} <- Regs],
     gen_server:reply(From, Data),
     {ok, State};
 
@@ -580,8 +576,8 @@ conn_handle_cast(nkapi_stop_ping, _NkPort, State) ->
 
 conn_handle_cast({nkapi_subscribe, Event}, _NkPort, #state{srv_id=SrvId}=State) ->
     #state{regs=Regs} = State,
-    Event2 = Event#event{srv_id=SrvId},
-    Pid = nkservice_events:reg(Event2),
+    Event2 = Event#nkevent{srv_id=SrvId},
+    Pid = nkevent:reg(Event2),
     Index = event_index(Event2),
     Regs2 = case lists:keyfind(Index, #reg.index, Regs) of
         false ->
@@ -596,12 +592,12 @@ conn_handle_cast({nkapi_subscribe, Event}, _NkPort, #state{srv_id=SrvId}=State) 
 
 conn_handle_cast({nkapi_unsubscribe, Event}, _NkPort, #state{srv_id=SrvId}=State) ->
     #state{regs=Regs} = State,
-    Event2 = Event#event{srv_id=SrvId},
+    Event2 = Event#nkevent{srv_id=SrvId},
     Index = event_index(Event2),
     case lists:keytake(Index, #reg.index, Regs) of
         {value, #reg{mon=Mon}, Regs2} ->
             demonitor(Mon),
-            ok = nkservice_events:unreg(Event2),
+            ok = nkevent:unreg(Event2),
             ?DEBUG("unregistered event ~p", [Event2], State),
             {ok, State#state{regs=Regs2}};
         false ->
@@ -613,7 +609,7 @@ conn_handle_cast({nkapi_unsubscribe_fun, Fun}, _NkPort, State) ->
     lists:foreach(
         fun(#reg{event=Event}) -> 
             case Fun(Event) of 
-                true -> unsubscribe(self(), Event#event{body=#{}});
+                true -> unsubscribe(self(), Event#nkevent{body=#{}});
                 false -> ok
             end
         end,
@@ -645,7 +641,7 @@ conn_handle_info(nkapi_send_ping, NkPort, #state{ping=Time}=State) ->
 
 %% This messages is received from nkservice_events when we receive an event
 %% we are subscribed to.
-conn_handle_info({nkservice_event, Event}, NkPort, State) ->
+conn_handle_info({nkevent, Event}, NkPort, State) ->
     case handle(api_server_forward_event, [Event], State) of
         {ok, Event2, State2} ->
             send_event(Event2, NkPort, State2);
@@ -750,21 +746,6 @@ process_client_resp(Result, Data, #trans{from=From}, _NkPort, State) ->
 %% ===================================================================
 
 %% @private
-parse_event(#event{}=Event) ->
-    {ok, Event};
-
-parse_event(Data) ->
-    case nkservice_events:parse(Data) of
-        {ok, #event{}=Event, []} ->
-            {ok, Event};
-        {ok, _, Unrecognized} ->
-            {error, {unrecognized_fields, Unrecognized}};
-        {error, Error} ->
-            {error, Error}
-    end.
-
-
-%% @private
 process_login(Reply, User, Meta, ReqOrTid, NkPort, State) ->
     #state{srv_id=SrvId, session_id=SessId, user_state=UserState} = State,
     UserState2 = UserState#{
@@ -779,14 +760,14 @@ process_login(Reply, User, Meta, ReqOrTid, NkPort, State) ->
     nklib_proc:put({?MODULE, SrvId}, {User, SessId}),
     nklib_proc:put({?MODULE, user, User}, {SessId, Meta}),
     nklib_proc:put({?MODULE, session, SessId}, User),
-    Event1 = #event{
+    Event1 = #nkevent{
         srv_id = SrvId,
         class = <<"api">>,
         subclass = <<"user">>,
         obj_id = User
     },
     subscribe(self(), Event1),
-    Event2 = Event1#event{
+    Event2 = Event1#nkevent{
         subclass = <<"session">>,
         obj_id = SessId
     },
@@ -919,7 +900,7 @@ send_event(Event, NkPort, State) ->
     #state{srv_id=_SrvId} = State,
     Msg = #{
         class => event,
-        data => nkservice_events:unparse(Event)
+        data => nkevent_util:unparse(Event)
     },
     send(Msg, NkPort, State).
 
@@ -991,7 +972,7 @@ handle(Fun, Args, State) ->
 
 %% @private
 event_index(Event) ->
-    erlang:phash2(Event#event{body=#{}, pid=undefined, meta=#{}}).
+    erlang:phash2(Event#nkevent{body=#{}, pid=undefined, meta=#{}}).
 
 
 %% @private

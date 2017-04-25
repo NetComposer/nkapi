@@ -6,7 +6,8 @@
     {mod, {nkapi_app, []}},
     {applications, [
         nkpacket,
-        nkservice
+        nkservice,
+        nkevent
     ]},
     {env, [
     ]}

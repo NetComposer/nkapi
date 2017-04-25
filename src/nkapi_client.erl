@@ -54,7 +54,7 @@
 -define(WS_TIMEOUT, 60*60*1000).
 
 -include("nkapi.hrl").
--include_lib("nkservice/include/nkservice.hrl").
+-include_lib("nkevent/include/nkevent.hrl").
 
 
 %% ===================================================================
@@ -124,18 +124,16 @@ cmd(Id, Class, Sub, Cmd, Data) ->
     do_call(Id, {cmd, Req}).
 
 
--spec event(id(), nkservice_events:event()|map()) ->
+-spec event(id(), nkevent:event()|map()) ->
     ok | {error, term()}.
 
-event(Id, #event{}=Event) ->
+event(Id, #nkevent{}=Event) ->
     do_cast(Id, {event, Event});
 
 event(Id, Data) ->
-    case nkservice_events:parse(Data) of
-        {ok, #event{}=Event, []} ->
-            event(Id, Event);
-        {ok, _, Unrecognized} ->
-            {error, {unrecognized_fields, Unrecognized}};
+    case nkevent_util:parse(Data) of
+        {ok, Event} ->
+            do_cast(Id, {event, Event});
         {error, Error} ->
             {error, Error}
     end.
@@ -238,7 +236,7 @@ conn_parse({text, Text}, NkPort, #state{srv_id=SrvId}=State) ->
     ?MSG("received ~s", [Msg], State),
     case Msg of
         #{<<"class">> := <<"event">>, <<"data">> := Data} ->
-            {ok, Event, []} = nkservice_events:parse(SrvId, Data),
+            {ok, [Event], []} = nkevent_util:parse(Data#{srv_id=>SrvId}),
             process_server_event(Event, State);
         #{<<"class">> := <<"session">>, <<"cmd">> := <<"ping">>, <<"tid">> := TId} ->
             send_reply_ok(#{}, TId, NkPort, State);
@@ -539,10 +537,10 @@ send_request(Req, From, NkPort, #state{tid=TId}=State) ->
 
 
 %% @private
-send_event(#event{}=Event, NkPort, State) ->
+send_event(#nkevent{}=Event, NkPort, State) ->
     Msg = #{
         class => event,
-        data => nkservice_events:unparse(Event)
+        data => nkevent_util:unparse(Event)
     },
     send(Msg, NkPort, State).
 

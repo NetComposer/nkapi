@@ -36,7 +36,7 @@
 
 -type data() :: map() | list().
 
--type event() :: nkservice_events:event().
+-type event() :: nkevent:event().
 
 
 %% ===================================================================

@@ -25,7 +25,7 @@
 -export([process_req/2, process_event/2]).
 
 -include("nkapi.hrl").
--include_lib("nkservice/include/nkservice.hrl").
+-include_lib("nkevent/include/nkevent.hrl").
 
 
 -define(DEBUG(Txt, Args, Req),
@@ -121,8 +121,8 @@ process_req(Req, State) ->
 process_event(Req, State) ->
     #nkapi_req{class=event, srv_id=SrvId, data=Data} = Req,
     ?DEBUG("parsing event ~p", [Data], Req),
-    case nkservice_events:parse(SrvId, Data) of
-        {ok, Event, Unrecognized} ->
+    case nkevent_util:parse(SrvId, Data) of
+        {ok, [Event], Unrecognized} ->
             case Unrecognized of
                 [] -> ok;
                 _ -> send_unrecognized_fields(Req, Unrecognized)
@@ -172,7 +172,7 @@ send_reply_event(Req, Type, Body) ->
         srv_id = SrvId,
         session_id = SessId
     } = Req,
-    Event = #event{
+    Event = #nkevent{
         class = <<"api">>,
         subclass = <<"session">>,
         type = Type,

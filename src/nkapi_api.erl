@@ -23,7 +23,7 @@
 -export([cmd/4]).
 
 -include("nkapi.hrl").
--include_lib("nkservice/include/nkservice.hrl").
+-include_lib("nkevent/include/nkevent.hrl").
 
 -define(DEBUG(Txt, Args, Req),
     case erlang:get(nkapi_server_debug) of
@@ -68,6 +68,8 @@
     {ok, map(), state()} | {error, nkservice:error(), state()}.
 
 cmd(event, subscribe, #nkapi_req{data=Data}, State) ->
+    lager:error("subscribe: ~p", [Data]),
+
     case nkapi_server:subscribe(self(), Data) of
         ok ->
             {ok, #{}, State};
@@ -104,7 +106,7 @@ cmd(event, send, #nkapi_req{data=Data}, State) ->
 
 cmd(event, send_to_user, #nkapi_req{srv_id=SrvId, data=Data}, State) ->
     #{user_id:=UserId} = Data,
-    Event = #event{
+    Event = #nkevent{
         class = <<"api">>,
         subclass = <<"user">>,
         type = maps:get(type, Data, <<>>),
@@ -112,7 +114,7 @@ cmd(event, send_to_user, #nkapi_req{srv_id=SrvId, data=Data}, State) ->
         obj_id = UserId,
         body = maps:get(body, Data, #{})
     },
-    case nkservice_events:send(Event) of
+    case nkevent:send(Event) of
         ok ->
             {ok, #{}, State};
         {error, Error} ->

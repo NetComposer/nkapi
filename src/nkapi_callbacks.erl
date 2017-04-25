@@ -244,19 +244,19 @@ api_server_http(_Method, _Path, _Req, State) ->
 
 
 %% @doc Called when a new event has been received from the client
--spec api_server_client_event(nkservice_events:event(), state()) ->
+-spec api_server_client_event(nkevent:event(), state()) ->
     {ok, map(), state()}.
 
 api_server_client_event(Event, State) ->
-    nkservice_events:send(Event),
+    nkevent:send(Event),
     {ok, State}.
 	
 
 %% @doc Called when the API server receives an event notification from 
 %% nkservice_events (because we are subscribed to it).
 %% We can send it to the remote side or ignore it.
--spec api_server_forward_event(nkservice_events:event(), state()) ->
-	{ok, nkservice_events:event(), continue()} |
+-spec api_server_forward_event(nkevent:event(), state()) ->
+	{ok, nkevent:event(), continue()} |
 	{ignore, state()}.
 
 api_server_forward_event(Event, State) ->
