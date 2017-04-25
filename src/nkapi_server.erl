@@ -225,11 +225,14 @@ unregister(Id, Link) ->
 -spec subscribe(id(), nkapi:event()) ->
     ok.
 
+subscribe(Id, #nkevent{}=Event) ->
+    do_cast(Id, {nkapi_subscribe, Event});
+
 subscribe(Id, Data) ->
     case nkevent_util:parse_subs(Data) of
         {ok, Events} ->
             lists:foreach(
-                fun(Event) -> do_cast(Id, {nkapi_subscribe, Event}) end,
+                fun(#nkevent{}=Event) -> subscribe(Id, Event) end,
                 Events);
         {error, Error} ->
             {error, Error}
@@ -240,11 +243,14 @@ subscribe(Id, Data) ->
 -spec unsubscribe(id(),  nkapi:event()) ->
     ok.
 
+unsubscribe(Id, #nkevent{}=Event) ->
+    do_cast(Id, {nkapi_unsubscribe, Event});
+
 unsubscribe(Id, Data) ->
     case nkevent_util:parse_subs(Data) of
         {ok, Events} ->
             lists:foreach(
-                fun(Event) -> do_cast(Id, {nkapi_unsubscribe, Event}) end,
+                fun(#nkevent{}=Event) -> unsubscribe(Id, Event) end,
                 Events);
         {error, Error} ->
             {error, Error}
@@ -577,7 +583,7 @@ conn_handle_cast(nkapi_stop_ping, _NkPort, State) ->
 conn_handle_cast({nkapi_subscribe, Event}, _NkPort, #state{srv_id=SrvId}=State) ->
     #state{regs=Regs} = State,
     Event2 = Event#nkevent{srv_id=SrvId},
-    Pid = nkevent:reg(Event2),
+    {ok, Pid} = nkevent:reg(Event2),
     Index = event_index(Event2),
     Regs2 = case lists:keyfind(Index, #reg.index, Regs) of
         false ->
