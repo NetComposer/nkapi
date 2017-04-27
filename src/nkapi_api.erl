@@ -68,8 +68,6 @@
     {ok, map(), state()} | {error, nkservice:error(), state()}.
 
 cmd(event, subscribe, #nkapi_req{data=Data}, State) ->
-    lager:error("subscribe: ~p", [Data]),
-
     case nkapi_server:subscribe(self(), Data) of
         ok ->
             {ok, #{}, State};

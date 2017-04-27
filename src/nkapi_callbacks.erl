@@ -253,7 +253,7 @@ api_server_client_event(Event, State) ->
 	
 
 %% @doc Called when the API server receives an event notification from 
-%% nkservice_events (because we are subscribed to it).
+%% nkevent (because we are subscribed to it).
 %% We can send it to the remote side or ignore it.
 -spec api_server_forward_event(nkevent:event(), state()) ->
 	{ok, nkevent:event(), continue()} |

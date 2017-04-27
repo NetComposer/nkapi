@@ -645,7 +645,7 @@ conn_handle_info(nkapi_send_ping, NkPort, #state{ping=Time}=State) ->
     Req = #nkapi_req{class=session, cmd=ping, data=#{time=>Time}},
     send_request(Req, undefined, NkPort, State);
 
-%% This messages is received from nkservice_events when we receive an event
+%% This messages is received from nkevent when we receive an event
 %% we are subscribed to.
 conn_handle_info({nkevent, Event}, NkPort, State) ->
     case handle(api_server_forward_event, [Event], State) of

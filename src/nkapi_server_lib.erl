@@ -121,12 +121,8 @@ process_req(Req, State) ->
 process_event(Req, State) ->
     #nkapi_req{class=event, srv_id=SrvId, data=Data} = Req,
     ?DEBUG("parsing event ~p", [Data], Req),
-    case nkevent_util:parse(SrvId, Data) of
-        {ok, [Event], Unrecognized} ->
-            case Unrecognized of
-                [] -> ok;
-                _ -> send_unrecognized_fields(Req, Unrecognized)
-            end,
+    case nkevent_util:parse(Data#{srv_id=>SrvId}) of
+        {ok, Event} ->
             Req2 = Req#nkapi_req{data=Event},
             case SrvId:api_server_allow(Req2, State) of
                 {true, State2} ->

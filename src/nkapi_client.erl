@@ -236,7 +236,7 @@ conn_parse({text, Text}, NkPort, #state{srv_id=SrvId}=State) ->
     ?MSG("received ~s", [Msg], State),
     case Msg of
         #{<<"class">> := <<"event">>, <<"data">> := Data} ->
-            {ok, [Event], []} = nkevent_util:parse(Data#{srv_id=>SrvId}),
+            {ok, Event} = nkevent_util:parse(Data#{srv_id=>SrvId}),
             process_server_event(Event, State);
         #{<<"class">> := <<"session">>, <<"cmd">> := <<"ping">>, <<"tid">> := TId} ->
             send_reply_ok(#{}, TId, NkPort, State);

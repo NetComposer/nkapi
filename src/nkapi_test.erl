@@ -42,7 +42,7 @@ start() ->
         callback => ?MODULE,
         api_server => "wss:all:9010, ws:all:9011/ws, https://all:9010/rpc",
         api_server_timeout => 300,
-        debug => [nkapi_client, nkapi_server, nkservice_events],
+        debug => [nkapi_client, nkapi_server, nkevent],
         plugins => [nkapi_log_gelf],
         api_gelf_server => "c2.netc.io",
         % To test nkpacket config:
@@ -290,7 +290,7 @@ http_cmd(Class, Sub, Cmd, Data) ->
 
 
 api_client_fun(#nkapi_req{class=event, data=Event}, UserData) ->
-    lager:notice("CLIENT event ~p", [lager:pr(Event, nkservice_events)]),
+    lager:notice("CLIENT event ~p", [lager:pr(Event, nkevent)]),
     {ok, UserData};
 
 api_client_fun(#nkapi_req{class=class1, data=Data}=_Req, UserData) ->
