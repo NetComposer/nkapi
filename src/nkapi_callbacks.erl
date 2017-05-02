@@ -199,6 +199,8 @@ api_server_allow(_Req, State) ->
 
 
 %% @doc Called when a new API command has arrived and is authorized
+%% For slow requests, reply {ack, state()}
+%% and nkapi_server:reply/2
 -spec api_server_cmd(#nkapi_req{}, state()) ->
 	{ok, map(), state()} | {ack, state()} |
     {login, Reply::term(), User::binary(), Meta::map(), state()} |

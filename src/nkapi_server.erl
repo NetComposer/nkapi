@@ -23,7 +23,7 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 -export([cmd/5, cmd_async/5, event/2]).
--export([reply_ok/3, reply_login/5, reply_error/3, reply_ack/2]).
+-export([reply/3, reply_login/5, reply_ack/2]).
 -export([stop/1, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
 -export([subscribe/2, unsubscribe/2, unsubscribe_fun/2]).
@@ -125,17 +125,21 @@ event(Id, Data) ->
 
 
 %% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
--spec reply_ok(id(), term(), map()) ->
+-spec reply(id(), term(), {ok, map()} | {error, term()}) ->
     ok.
 
-reply_ok(Id, TId, Data) ->
+reply(Id, TId, Reply) ->
+    Msg = case Reply of
+        {ok, Ok} -> {nkapi_reply_ok, TId, Ok};
+        {error, Error} ->  {nkapi_reply_error, Error}
+    end,
     case find(Id) of
         {ok, Pid} ->
-            gen_server:cast(Pid, {nkapi_reply_ok, TId, Data});
+            gen_server:cast(Pid, Msg);
         not_found ->
             case find_session_http(Id) of
                 {ok, Pid} ->
-                    Pid ! {nkapi_reply_ok, Data};
+                    Pid ! Msg;
                 _ ->
                     ok
             end
@@ -148,24 +152,6 @@ reply_ok(Id, TId, Data) ->
 
 reply_login(Id, TId, Reply, User, MetaData) ->
     do_cast(Id, {nkapi_reply_login, TId, Reply, User, MetaData}).
-
-
-%% @doc Sends an error reply to a command (when you reply 'ack' in callbacks)
--spec reply_error(id(), term(), nkapi:error()) ->
-    ok.
-
-reply_error(Id, TId, Code) ->
-    case find(Id) of
-        {ok, Pid} ->
-            gen_server:cast(Pid, {nkapi_reply_error, TId, Code});
-        not_found ->
-            case find_session_http(Id) of
-                {ok, Pid} ->
-                    Pid ! {nkapi_reply_error, Code};
-                _ ->
-                    ok
-            end
-    end.
 
 
 %% @doc Sends another ACK to a command (when you reply 'ack' in callbacks)

@@ -90,7 +90,7 @@ cmd(event, get_subscriptions, #nkapi_req{tid=TId},
     spawn_link(
         fun() ->
             Reply = nkapi_server:get_subscriptions(Self),
-            nkapi_server:reply_ok(Self, TId, Reply)
+            nkapi_server:reply(Self, TId, {ok, Reply})
         end),
     {ack, State};
 
@@ -169,7 +169,7 @@ cmd(session, api_test_async, #nkapi_req{tid=TId, data=#{data:=Data}}, State) ->
     spawn_link(
         fun() ->
             timer:sleep(2000),
-            nkapi_server:reply_ok(Self, TId, #{reply=>Data})
+            nkapi_server:reply(Self, TId, {ok, #{reply=>Data}})
         end),
     {ack, State};
 
@@ -190,14 +190,14 @@ launch_cmd(#nkapi_req{data=Data, tid=TId}=Req, Pid, Self) ->
     CmdData = maps:get(data, Data, #{}),
     case nkapi_server:cmd(Pid, Class, Sub, Cmd, CmdData) of
         {ok, <<"ok">>, ResData} ->
-            nkapi_server:reply_ok(Self, TId, ResData);
+            nkapi_server:reply(Self, TId, {ok, ResData});
         {ok, <<"error">>, #{<<"code">>:=Code, <<"error">>:=Error}} ->
-            nkapi_server:reply_error(Self, TId, {Code, Error});
+            nkapi_server:reply(Self, TId, {error, {Code, Error}});
         {ok, Res, _ResData} ->
             Ref = nklib_util:uid(),
             ?LLOG(notice, "invalid reply: ~p (~p)", [Res, Ref], Req),
-            nkapi_server:reply_error(Self, TId, {internal_error, Ref});
+            nkapi_server:reply(Self, TId, {error, {internal_error, Ref}});
         {error, Error} ->
-            nkapi_server:reply_error(Self, TId, Error)
+            nkapi_server:reply(Self, TId, {error, Error})
     end.
 
