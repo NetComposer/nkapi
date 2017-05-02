@@ -88,14 +88,14 @@ process_req(Req, State) ->
             ?DEBUG("parsing syntax ~p (~p)", [Data, Syntax], Req),
             case nklib_syntax:parse(Data, Syntax) of
                 {ok, Parsed, _Ext, Unrecognized} ->
-                    case Unrecognized of
-                        [] -> ok;
-                        _ -> send_unrecognized_fields(Req, Unrecognized)
-                    end,
                     Req4 = Req3#nkapi_req{data=Parsed},
                     case SrvId:api_server_allow(Req4, State2) of
                         {true, State3} ->
                             ?DEBUG("request allowed", [], Req),
+                            case Unrecognized of
+                                [] -> ok;
+                                _ -> send_unrecognized_fields(Req, Unrecognized)
+                            end,
                             SrvId:api_server_cmd(Req4, State3);
                         {false, State3} ->
                             ?DEBUG("request NOT allowed", [], Req),
