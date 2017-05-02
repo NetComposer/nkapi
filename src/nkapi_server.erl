@@ -131,7 +131,7 @@ event(Id, Data) ->
 reply(Id, TId, Reply) ->
     Msg = case Reply of
         {ok, Ok} -> {nkapi_reply_ok, TId, Ok};
-        {error, Error} ->  {nkapi_reply_error, Error}
+        {error, Error} ->  {nkapi_reply_error, TId, Error}
     end,
     case find(Id) of
         {ok, Pid} ->
