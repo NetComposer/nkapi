@@ -87,7 +87,7 @@ process_req(Req, State) ->
             {Syntax, Req3, State2} = SrvId:api_server_syntax(#{}, Req2, State),
             ?DEBUG("parsing syntax ~p (~p)", [Data, Syntax], Req),
             case nklib_syntax:parse(Data, Syntax) of
-                {ok, Parsed, _Ext, Unrecognized} ->
+                {ok, Parsed, Unrecognized} ->
                     Req4 = Req3#nkapi_req{data=Parsed},
                     case SrvId:api_server_allow(Req4, State2) of
                         {true, State3} ->
