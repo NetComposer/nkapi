@@ -41,20 +41,20 @@ syntax(event, send, Syntax) ->
     events(Syntax);
 
 syntax(event, send_to_user, Syntax) ->
-    S2 = Syntax#{
+    Syntax#{
         user_id => binary,
         type => binary,
-        body => map
-    },
-    nklib_syntax:add_mandatory([user_id], S2);
+        body => map,
+        '__mandatory' => [user_id]
+    };
 
 syntax(event, send_to_session, Syntax) ->
-    S2 = Syntax#{
+    Syntax#{
         session_id => binary,
         type => binary,
-        body => map
-    },
-    nklib_syntax:add_mandatory([session_id], S2);
+        body => map,
+        '__mandatory' => [session_id]
+    };
 
 syntax(session, ping, Syntax) ->
     Syntax#{time=>integer};
@@ -63,29 +63,31 @@ syntax(session, stop, Syntax) ->
     Syntax#{session_id => binary};
 
 syntax(session, cmd, Syntax) ->
-    S2 = Syntax#{
+    Syntax#{
         session_id => binary,
         class => atom,
         subclass => atom,
         cmd => atom,
-        data => map
-    },
-    nklib_syntax:add_mandatory([session_id, class, cmd], S2);
+        data => map,
+        '__mandatory' => [session_id, class, cmd]
+    };
 
 syntax(session, log, Syntax) ->
-    S2 = Syntax#{
+    Syntax#{
         source => binary,
         message => binary,
         full_message => binary,
         level => {integer, 1, 7},
-        meta => any
-    },
-    S3 = nklib_syntax:add_defaults(#{level=>6}, S2),
-    nklib_syntax:add_mandatory([source, message], S3);
+        meta => any,
+        '__defaults' => #{level=>6},
+        '__mandatory' => [source, message]
+    };
 
 syntax(session, api_test_async, Syntax) ->
-    S2 = Syntax#{data=>any},
-    nklib_syntax:add_mandatory([data], S2);
+    Syntax#{
+        data=>any,
+        '__mandatory' => [data]
+    };
 
 syntax(_Sub, _Cmd, Syntax) ->
     Syntax.
@@ -98,11 +100,11 @@ syntax(_Sub, _Cmd, Syntax) ->
 
 %% @private
 events(Syntax) ->
-    S2 = Syntax#{
+    Syntax#{
         class => binary,
         subclass => binary,
         type => binary,
         obj_id => binary,
-        body => map
-    },
-    nklib_syntax:add_mandatory([class], S2).
+        body => map,
+        '__mandatory' => [class]
+    }.
