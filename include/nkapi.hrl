@@ -23,7 +23,8 @@
 	tid :: term(),
 	user_id = <<>> :: binary(),
 	session_id = <<>> :: binary(),
-	module = undefined :: module() | undefined
+	module = undefined :: module() | undefined,
+    unknown_fields = [] :: [binary()]
 }).
 
 

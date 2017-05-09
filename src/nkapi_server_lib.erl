@@ -87,16 +87,22 @@ process_req(Req, State) ->
             {Syntax, Req3, State2} = SrvId:api_server_syntax(#{}, Req2, State),
             ?DEBUG("parsing syntax ~p (~p)", [Data, Syntax], Req),
             case nklib_syntax:parse(Data, Syntax) of
-                {ok, Parsed, Unrecognized} ->
-                    Req4 = Req3#nkapi_req{data=Parsed},
+                {ok, Parsed, Unknown} ->
+                    Req4 = Req3#nkapi_req{data=Parsed, unknown_fields=Unknown},
                     case SrvId:api_server_allow(Req4, State2) of
                         {true, State3} ->
                             ?DEBUG("request allowed", [], Req),
-                            case Unrecognized of
-                                [] -> ok;
-                                _ -> send_unrecognized_fields(Req, Unrecognized)
-                            end,
-                            SrvId:api_server_cmd(Req4, State3);
+                            case SrvId:api_server_cmd(Req4, State3) of
+                                {ok, Reply, State4} ->
+                                    {ok, send_unknown(Reply, Req4), State4};
+                                {login, Reply, User, Meta, State4} ->
+                                    {login, send_unknown(Reply, Req4), User, Meta, State4};
+                                {ack, State4} ->
+                                    send_unknown(none, Req4),
+                                    {ack, State4};
+                                {error, Error, State4} ->
+                                    {error, Error, State4}
+                            end;
                         {false, State3} ->
                             ?DEBUG("request NOT allowed", [], Req),
                             {error, unauthorized, State3}
@@ -155,10 +161,19 @@ make_req(#nkapi_req{class=Class, subclass=Sub, cmd=Cmd}=Req) ->
 
 
 %% @private
-send_unrecognized_fields(Req, Fields) ->
-    #nkapi_req{class=Class, subclass=Sub, cmd=Cmd} = Req,
-    Body = #{class=>Class, subclass=>Sub, cmd=>Cmd, fields=>Fields},
+send_unknown(Reply, #nkapi_req{unknown_fields=[]}) ->
+    Reply;
+
+send_unknown(Reply, #nkapi_req{unknown_fields=Unknown}) when is_map(Reply) ->
+    BaseUnknowns = maps:get(unknown_fields, Reply, []),
+    Reply#{unknown_fields => lists:usort(BaseUnknowns++Unknown)};
+
+send_unknown(_Reply, Req) ->
+    #nkapi_req{class=Class, subclass=Sub, cmd=Cmd, unknown_fields=Unknown} = Req,
+    Body = #{class=>Class, subclass=>Sub, cmd=>Cmd, fields=>Unknown},
     send_reply_event(Req, <<"unrecognized_fields">>, Body).
+
+
 
 
 %% @private
