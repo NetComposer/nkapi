@@ -109,6 +109,7 @@ api_error(SrvId, Error) ->
     {atom(), Fmt::string(), Vals::string()}.
 
 api_error(already_authenticated)	-> "Already authenticated";
+api_error(already_started)	        -> "Already started";
 api_error(already_uploaded)   		-> "Already uploaded";
 api_error(api_delete) 				-> "API delete received";
 api_error(api_stop) 				-> "API stop received";
@@ -138,6 +139,7 @@ api_error(normal)           		-> "Normal termination";
 api_error(normal_termination) 		-> "Normal termination";
 api_error(not_authenticated)		-> "Not authenticated";
 api_error(not_found) 				-> "Not found";
+api_error(not_started) 				-> "Not yet started";
 api_error(not_implemented) 		    -> "Not implemented";
 api_error(process_down)  			-> "Process failed";
 api_error(process_not_found) 		-> "Process not found";
