@@ -23,9 +23,32 @@
 	tid :: term(),
 	user_id = <<>> :: binary(),
 	session_id = <<>> :: binary(),
-	module = undefined :: module() | undefined,
+	%module = undefined :: module() | undefined,
     unknown_fields = [] :: [binary()]
 }).
+
+
+-record(nkapi_req2, {
+	cmd = <<>> :: nkapi:cmd(),
+	data = #{} :: nkapi:data(),
+	tid :: term(),
+	unknown_fields = [] :: [binary()]
+}).
+
+
+
+-record(nkapi_session, {
+	srv_id :: nkservice:id(),
+	session_type :: atom(),
+	session_id = <<>> :: nkapi:session_id(),
+	local = <<>> :: binary(),               % Transp:Ip:Port
+	remote = <<>> :: binary(),
+	user_id = <<>> :: nkapi:user_id(),      % <<>> if not authenticated
+	user_meta = #{} :: map(),				% Login information
+	data = #{} :: map()						% Service information
+}).
+
+
 
 
 -endif.

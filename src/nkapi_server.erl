@@ -22,7 +22,7 @@
 -module(nkapi_server).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
--export([cmd/5, cmd_async/5, event/2]).
+-export([cmd/3, cmd_async/3, event/2]).
 -export([reply/3, reply_login/5, reply_ack/2]).
 -export([stop/1, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
@@ -33,7 +33,7 @@
 -export([conn_init/1, conn_encode/2, conn_parse/3, conn_handle_call/4, 
          conn_handle_cast/3, conn_handle_info/3, conn_stop/3]).
 -export([get_all/0, get_all/1, print/3]).
--export_type([user_state/0]).
+
 
 % To debug, set debug => [nkapi_server]
 % To debug nkpacket, set debug in listener (nkapi_util:get_api_sockets())
@@ -47,11 +47,15 @@
 -define(LLOG(Type, Txt, Args, State),
     lager:Type(
         [
-            {session_id, State#state.session_id},
-            {user_id, State#state.user_id}
+            {session_id, State#state.session#nkapi_session.session_id},
+            {user_id, State#state.session#nkapi_session.user_id}
         ],
         "NkAPI API Server ~s (~s) "++Txt, 
-        [State#state.session_id, State#state.user_id | Args])).
+        [
+            State#state.session#nkapi_session.session_id,
+            State#state.session#nkapi_session.user_id
+            | Args
+        ])).
 
 -define(MSG(Txt, Args, State),
     case erlang:get(nkapi_server_debug) of
@@ -73,44 +77,29 @@
 
 -type id() :: pid() | nkapi:id().
 
--type user_state() ::
-    #{
-        srv_id => nkservice:id(),
-        session_type => atom(),
-        session_id => binary(),
-        local => binary(),              % Transport:Ip:Port
-        remote => binary(),             % Transport:Ip:Port
-        user_id => binary(),            % not present if not authenticated
-        user_meta => map(),             % "
-        module() => term()
-    }.
-
 
 %% ===================================================================
 %% Public
 %% ===================================================================
 
 %% @doc Send a command to the client and wait a response
--spec cmd(id(), nkapi:class(), nkapi:subclass(), nkapi:cmd(), nkapi:data()) ->
+-spec cmd(id(), nkapi:cmd(), nkapi:data()) ->
     {ok, Result::binary(), Data::map()} | {error, term()}.
 
-cmd(Id, Class, SubClass, Cmd, Data) ->
-    Req = #nkapi_req{class=Class, subclass=SubClass, cmd=Cmd, data=Data},
-    do_call(Id, {nkapi_send_req, Req}).
+cmd(Id, Cmd, Data) ->
+    do_call(Id, {nkapi_send_req, Cmd, Data}).
 
 
 %% @doc Send a command and don't wait for a response
--spec cmd_async(id(), nkapi:class(), nkapi:subclass(), nkapi:cmd(), nkapi:data()) ->
+-spec cmd_async(id(), nkapi:cmd(), nkapi:data()) ->
     ok | {error, term()}.
 
-cmd_async(Id, Class, SubClass, Cmd, Data) ->
-    Req = #nkapi_req{class=Class, subclass=SubClass, cmd=Cmd, data=Data},
-    do_cast(Id, {nkapi_send_req, Req}).
+cmd_async(Id, Cmd, Data) ->
+    do_cast(Id, {nkapi_send_req, Cmd, Data}).
 
 
 %% @doc Sends an event directly to the client (as it were subscribed)
 %% Response is not expected from remote
-%% Events can also be sent using class=event, cmd=send and a tid
 -spec event(id(), map()|#nkevent{}) ->
     ok | {error, term()}.
 
@@ -121,7 +110,6 @@ event(Id, Data) ->
         {error, Error} ->
             {error, Error}
     end.
-
 
 
 %% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
@@ -251,7 +239,6 @@ unsubscribe_fun(Id, Fun) ->
     do_cast(Id, {nkapi_unsubscribe_fun, Fun}).
 
 
-
 %% @private
 -spec get_all() ->
     [{User::binary(), SessId::binary(), pid()}].
@@ -332,16 +319,14 @@ do_register_http(SessId) ->
 }).
 
 -record(state, {
-    srv_id :: nkapi:id(),
-    user_id = <<>> :: binary(),
-    session_id = <<>> :: binary(),
+    srv_id :: nkservice:id(),
     trans = #{} :: #{tid() => #trans{}},
     tid = 1 :: integer(),
     ping :: integer() | undefined,
     op_time :: integer(),
     regs = [] :: [#reg{}],
     links :: nklib_links:links(),
-    user_state :: nkapi:user_state()
+    session :: #nkapi_session{}
 }).
 
 
@@ -370,20 +355,22 @@ conn_init(NkPort) ->
     {ok, Local} = nkpacket:get_local_bin(NkPort),
     {ok, Remote} = nkpacket:get_remote_bin(NkPort),
     SessId = <<"session-", (nklib_util:luid())/binary>>,
-    UserState = #{
-        srv_id => SrvId, 
-        session_type => ?MODULE,
-        session_id => SessId,
-        local => Local,
-        remote => Remote
-    },
     true = nklib_proc:reg({?MODULE, session, SessId}, <<>>),
-    State1 = #state{
+    Session = #nkapi_session{
         srv_id = SrvId,
         session_id = SessId,
-        user_state = UserState,
+        session_type = ?MODULE,
+        local = Local,
+        remote = Remote,
+        user_id = <<>>,
+        user_meta = #{},
+        data = #{}
+    },
+    State1 = #state{
+        srv_id = SrvId,
         links = nklib_links:new(),
-        op_time = nkapi_app:get(api_cmd_timeout)
+        op_time = nkapi_app:get(api_cmd_timeout),
+        session = Session
     },
     set_log(State1),
     nkservice_util:register_for_changes(SrvId),
@@ -408,30 +395,15 @@ conn_parse({text, Text}, NkPort, State) ->
             Json
     end,
     case Msg of
-        #{<<"class">> := Class, <<"cmd">> := Cmd, <<"tid">> := TId} ->
+        #{<<"cmd">> := Cmd, <<"tid">> := TId} ->
             ?MSG("received ~s", [Msg], State),
-            #state{srv_id=SrvId, user_id=User, session_id=Session} = State,
-            Req = #nkapi_req{
-                srv_id = SrvId,
-                class = Class,
-                subclass = maps:get(<<"subclass">>, Msg, <<>>),
-                cmd = Cmd,
-                tid = TId,
-                data = maps:get(<<"data">>, Msg, #{}), 
-                user_id = User,
-                session_id = Session
-            },
+            Cmd2 = get_cmd(Cmd, Msg),
+            Data = maps:get(<<"data">>, Msg, #{}),
+            Req = #nkapi_req2{cmd=Cmd2, data=Data, tid=TId},
             process_client_req(Req, NkPort, State);
-        #{<<"class">> := <<"event">>, <<"data">> := Data} ->
+        #{<<"cmd">> := <<"event">>, <<"data">> := Data} ->
             ?MSG("received event ~s", [Data], State),
-            #state{srv_id=SrvId, user_id=User, session_id=Session} = State,
-            Req = #nkapi_req{
-                srv_id = SrvId,
-                class = event,
-                data = Data,
-                user_id = User,
-                session_id = Session
-            },
+            Req = #nkapi_req2{cmd = <<"event">>, data=Data},
             process_client_event(Req, State);
         #{<<"result">> := Result, <<"tid">> := TId} ->
             case extract_op(TId, State) of
@@ -483,8 +455,8 @@ conn_encode(Msg, _NkPort) when is_binary(Msg) ->
 -spec conn_handle_call(term(), {pid(), term()}, nkpacket:nkport(), #state{}) ->
     {ok, #state{}} | {stop, Reason::term(), #state{}}.
 
-conn_handle_call({nkapi_send_req, Req}, From, NkPort, State) ->
-    send_request(Req, From, NkPort, State);
+conn_handle_call({nkapi_send_req, Cmd, Data}, From, NkPort, State) ->
+    send_request(Cmd, Data, From, NkPort, State);
     
 conn_handle_call(nkapi_get_subscriptions, From, _NkPort, #state{regs=Regs}=State) ->
     Data = [nkevent_util:unparse(Event) || #reg{event=Event} <- Regs],
@@ -502,8 +474,8 @@ conn_handle_call(Msg, From, _NkPort, State) ->
 -spec conn_handle_cast(term(), nkpacket:nkport(), #state{}) ->
     {ok, #state{}} | {stop, Reason::term(), #state{}}.
 
-conn_handle_cast({nkapi_send_req, Req}, NkPort, State) ->
-    send_request(Req, undefined, NkPort, State);
+conn_handle_cast({nkapi_send_req, Cmd, Data}, NkPort, State) ->
+    send_request(Cmd, Data, undefined, NkPort, State);
 
 conn_handle_cast({nkapi_send_event, Event}, NkPort, State) ->
     send_event(Event, NkPort, State);
@@ -522,8 +494,9 @@ conn_handle_cast({nkapi_reply_login, TId, Reply, User, Meta}, NkPort, State) ->
     case extract_op(TId, State) of
         {#trans{op=ack}, State2} ->
             case State of
-                #state{user_id = <<>>} ->
-                    process_login(Reply, User, Meta, TId, NkPort, State2);
+                #state{session=#nkapi_session{user_id = <<>>}=Session} ->
+                    Session2 = Session#nkapi_session{user_id=User, user_meta=Meta},
+                    process_login(Reply, TId, NkPort, State#state{session=Session2});
                 _ ->
                     send_reply_error(already_authenticated, TId, NkPort, State2)
             end;
@@ -628,8 +601,7 @@ conn_handle_info(nkapi_send_ping, _NkPort, #state{ping=undefined}=State) ->
 
 conn_handle_info(nkapi_send_ping, NkPort, #state{ping=Time}=State) ->
     erlang:send_after(1000*Time, self(), nkapi_send_ping),
-    Req = #nkapi_req{class=session, cmd=ping, data=#{time=>Time}},
-    send_request(Req, undefined, NkPort, State);
+    send_request(ping, data=#{time=>Time}, undefined, NkPort, State);
 
 %% This messages is received from nkevent when we receive an event
 %% we are subscribed to.
@@ -699,31 +671,29 @@ conn_stop(Reason, _NkPort, #state{trans=Trans}=State) ->
 %% ===================================================================
 
 %% @private
-process_client_req(Req, NkPort, #state{user_id=User, user_state=UserState} = State) ->
-    case nkapi_server_lib:process_req(Req, UserState) of
-        {ok, Reply, UserState2} ->
-            State2 = State#state{user_state=UserState2},
-            send_reply_ok(Reply, Req, NkPort, State2);
-        {ack, UserState2} ->
-            State2 = State#state{user_state=UserState2},
-            State3 = insert_ack(Req, State2),
-            send_ack(Req, NkPort, State3);
-        {login, Reply, User2, Meta, UserState2} when User == <<>> ->
-            State2 = State#state{user_state=UserState2},
-            process_login(Reply, User2, Meta, Req, NkPort, State2);
-        {login, _Reply, _User, _Meta, UserState2} ->
-            State2 = State#state{user_state=UserState2},
-            send_reply_error(already_authenticated, Req, NkPort, State2);
-        {error, Error, UserState2} ->
-            State2 = State#state{user_state=UserState2},
-            send_reply_error(Error, Req, NkPort, State2)
+process_client_req(Req, NkPort, #state{session=Session}=State) ->
+    case nkapi_server_lib:process_req(Req, Session) of
+        {ok, Reply, Session2} ->
+            send_reply_ok(Reply, Req, NkPort, State#state{session=Session2});
+        {ack, Session2} ->
+            State2 = insert_ack(Req, State#state{session=Session2}),
+            send_ack(Req, NkPort, State2);
+        {login, Reply, Session2} ->
+            case Session of
+                #nkapi_session{user_id = <<>>} ->
+                    process_login(Reply, Req, NkPort, State#state{session=Session2});
+                _ ->
+                    send_reply_error(already_authenticated, Req, NkPort, State)
+            end;
+        {error, Error, Session2} ->
+            send_reply_error(Error, Req, NkPort, State#state{session=Session2})
     end.
 
 
 %% @private
-process_client_event(Req, #state{user_state=UserState} = State) ->
-    {ok, UserState2} = nkapi_server_lib:process_event(Req, UserState),
-    {ok, State#state{user_state=UserState2}}.
+process_client_event(Req, #state{session=Session}=State) ->
+    {ok, Session2} = nkapi_server_lib:process_event(Req, Session),
+    {ok, State#state{session=Session2}}.
 
 
 %% @private
@@ -738,25 +708,31 @@ process_client_resp(Result, Data, #trans{from=From}, _NkPort, State) ->
 %% ===================================================================
 
 %% @private
-process_login(Reply, User, Meta, ReqOrTid, NkPort, State) ->
-    #state{srv_id=SrvId, session_id=SessId, user_state=UserState} = State,
-    UserState2 = UserState#{
-        user_id => User,
-        user_meta => Meta
-    },
-    State2 = State#state{
-        user_id = User,
-        user_state = UserState2
-    },
-    nklib_proc:put(?MODULE, {User, SessId}),
-    nklib_proc:put({?MODULE, SrvId}, {User, SessId}),
-    nklib_proc:put({?MODULE, user, User}, {SessId, Meta}),
-    nklib_proc:put({?MODULE, session, SessId}, User),
+get_cmd(Cmd, Msg) ->
+    Cmd2 = case Msg of
+        #{<<"subclass">> := Sub} -> <<Sub/binary, $., Cmd/binary>>;
+        _ -> Cmd
+    end,
+    case Msg of
+        #{<<"class">> := Class} -> <<Class/binary, $., Cmd2/binary>>;
+        _ -> Cmd2
+    end.
+
+
+
+%% @private
+process_login(Reply, ReqOrTId, NkPort, State) ->
+    #state{srv_id=SrvId, session=Session} = State,
+    #nkapi_session{session_id=SessId, user_id=UserId, user_meta=Meta} = Session,
+    nklib_proc:put(?MODULE, {UserId, SessId}),
+    nklib_proc:put({?MODULE, SrvId}, {UserId, SessId}),
+    nklib_proc:put({?MODULE, user, UserId}, {SessId, Meta}),
+    nklib_proc:put({?MODULE, session, SessId}, UserId),
     Event1 = #nkevent{
         srv_id = SrvId,
         class = <<"api">>,
         subclass = <<"user">>,
-        obj_id = User
+        obj_id = UserId
     },
     subscribe(self(), Event1),
     Event2 = Event1#nkevent{
@@ -765,7 +741,7 @@ process_login(Reply, User, Meta, ReqOrTid, NkPort, State) ->
     },
     subscribe(self(), Event2),
     start_ping(self(), nkapi_app:get(api_ping_timeout)),
-    send_reply_ok(Reply#{session_id=>SessId}, ReqOrTid, NkPort, State2).
+    send_reply_ok(Reply#{session_id=>SessId}, ReqOrTId, NkPort, State).
 
 
 %% @private
@@ -830,7 +806,7 @@ insert_op(TId, Op, From, #state{trans=AllTrans, op_time=Time}=State) ->
 
 
 %% @private
-insert_ack(#nkapi_req{tid=TId}, State) ->
+insert_ack(#nkapi_req2{tid=TId}, State) ->
     insert_ack(TId, State);
 
 insert_ack(TId, #state{trans=AllTrans}=State) ->
@@ -863,28 +839,21 @@ extend_op(TId, #trans{timer=Timer}=Trans, #state{trans=AllTrans}=State) ->
 
 
 %% @private
-send_request(Req, From, NkPort, #state{tid=TId}=State) ->
-    #nkapi_req{class=Class, subclass=Sub, cmd=Cmd, data=Data} = Req,
+send_request(Cmd, Data, From, NkPort, #state{tid=TId}=State) ->
     Msg1 = #{
-        class => Class,
         cmd => Cmd,
         tid => TId
     },
-    Msg2 = case Sub of
-        <<>> -> Msg1;
-        '' -> Msg1;
-        _ -> Msg1#{subclass=>Sub}
-    end,
-    Msg3 = if 
+    Msg2 = if
         is_map(Data), map_size(Data)>0  ->
-            Msg2#{data=>Data};
+            Msg1#{data=>Data};
         is_list(Data) ->
-            Msg2#{data=>Data};
+            Msg1#{data=>Data};
         true ->
-            Msg2
+            Msg1
         end,
-    State2 = insert_op(TId, Msg3, From, State),
-    send(Msg3, NkPort, State2#state{tid=TId+1}).
+    State2 = insert_op(TId, Msg2, From, State),
+    send(Msg2, NkPort, State2#state{tid=TId+1}).
 
 
 %% @private
@@ -898,7 +867,7 @@ send_event(Event, NkPort, State) ->
 
 
 %% @private
-send_reply_ok(Data, #nkapi_req{tid=TId}, NkPort, State) ->
+send_reply_ok(Data, #nkapi_req2{tid=TId}, NkPort, State) ->
     send_reply_ok(Data, TId, NkPort, State);
 
 send_reply_ok(Data, TId, NkPort, State) ->
@@ -915,7 +884,7 @@ send_reply_ok(Data, TId, NkPort, State) ->
 
 
 %% @private
-send_reply_error(Error, #nkapi_req{tid=TId}, NkPort, State) ->
+send_reply_error(Error, #nkapi_req2{tid=TId}, NkPort, State) ->
     send_reply_error(Error, TId, NkPort, State);
 
 send_reply_error(Error, TId, NkPort, #state{srv_id=SrvId}=State) ->
@@ -932,7 +901,7 @@ send_reply_error(Error, TId, NkPort, #state{srv_id=SrvId}=State) ->
 
 
 %% @private
-send_ack(#nkapi_req{tid=TId}, NkPort, State) ->
+send_ack(#nkapi_req2{tid=TId}, NkPort, State) ->
     send_ack(TId, NkPort, State);
 
 send_ack(TId, NkPort, State) ->
@@ -959,7 +928,7 @@ send(Msg, NkPort) ->
 
 %% @private
 handle(Fun, Args, State) ->
-    nklib_gen_server:handle_any(Fun, Args, State, #state.srv_id, #state.user_state).
+    nklib_gen_server:handle_any(Fun, Args, State, #state.srv_id, #state.session).
 
 
 %% @private

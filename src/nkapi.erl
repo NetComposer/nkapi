@@ -20,19 +20,15 @@
 
 -module(nkapi).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
--export_type([id/0, class/0, subclass/0, cmd/0, data/0, event/0]).
+-export_type([id/0, cmd/0, data/0, event/0]).
 
 %% ===================================================================
 %% Types
 %% ===================================================================
 
--type id() :: pid() | binary().
+-type id() :: binary().
 
--type class() :: atom() | binary().
-
--type subclass() :: atom() | binary().
-
--type cmd() :: atom() | binary().
+-type cmd() :: binary().
 
 -type data() :: map() | list().
 
