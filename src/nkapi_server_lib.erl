@@ -26,27 +26,27 @@
 
 -include("nkapi.hrl").
 -include_lib("nkevent/include/nkevent.hrl").
+-include_lib("nkservice/include/nkservice.hrl").
 
 
--define(DEBUG(Txt, Args, Req, Session),
+-define(DEBUG(Txt, Args, Req),
     case erlang:get(nkapi_server_debug) of
-        true -> ?LLOG(debug, Txt, Args, Req, Session);
+        true -> ?LLOG(debug, Txt, Args, Req);
         _ -> ok
     end).
 
--define(LLOG(Type, Txt, Args, Req, Session),
+-define(LLOG(Type, Txt, Args, Req),
     lager:Type(
         [
-            {session_id, Session#nkapi_session.session_id},
-            {session_type, Session#nkapi_session.session_type},
-            {user_id, Session#nkapi_session.user_id},
-            {cmd, Req#nkapi_req2.cmd}
+            {session_id, Req#nkreq.session_id},
+            {user_id, Req#nkreq.user_id},
+            {cmd, Req#nkreq.cmd}
         ],
         "NkAPI API Server (~s, ~s, ~s) "++Txt,
         [
-            Session#nkapi_session.user_id,
-            Session#nkapi_session.session_id,
-            Req#nkapi_req2.cmd
+            Req#nkreq.user_id,
+            Req#nkreq.session_id,
+            Req#nkreq.cmd
             | Args
         ])).
 
@@ -55,8 +55,7 @@
 %% Types
 %% ===================================================================
 
--type req() :: #nkapi_req2{}.
--type session() :: #nkapi_session{}.
+-type req() :: #nkreq{}.
 
 
 
@@ -74,68 +73,48 @@
 %% If it is valid, calls SrvId:api_server_allow() to authorized the request
 %% If is is authorized, calls SrvId:api_server_cmd() to process the request.
 %% It received some state (usually from api_server_cmd/5) that can be updated
--spec process_req(req(), session()) ->
+-spec process_req(req()) ->
     {ok, Reply::term(), session()} | {ack, session()} |
     {login, Reply::term(), session()} | {error, nkapi:error(), session()}.
 
-process_req(Req, Session) ->
-    #nkapi_session{srv_id=SrvId} = Session,
-    {Syntax, Session2} = SrvId:api_server_syntax(#{}, Req, Session),
-    #nkapi_req2{data=Data} = Req,
-    ?DEBUG("parsing syntax ~p (~p)", [Data, Syntax], Req, Session),
+process_req(Req) ->
+    #nkreq{srv_id=SrvId, data=Data} = Req,
+    {Syntax, Req2} = SrvId:service_api_syntax(Req, #{}),
+    ?DEBUG("parsing syntax ~p (~p)", [Data, Syntax], Req),
     case nklib_syntax:parse(Data, Syntax) of
         {ok, Parsed, Unknown} ->
-            Req2 = Req#nkapi_req2{data=Parsed, unknown_fields=Unknown},
-            case SrvId:api_server_allow(Req2, Session2) of
-                true ->
-                    do_process_req(Req2, Session2);
-                {true, Session3} ->
-                    do_process_req(Req2, Session3);
-                false ->
-                    ?DEBUG("request NOT allowed", [], Req2, Session2),
-                    {error, unauthorized, Session2};
-                {false, Session3} ->
-                    ?DEBUG("request NOT allowed", [], Req2, Session3),
-                    {error, unauthorized, Session3}
+            Req3 = Req2#nkreq{data=Parsed, unknown_fields=Unknown},
+            case SrvId:service_api_allow(Req3) of
+                {true, Req4} ->
+                    do_process_req(Req4);
+                {false, Req4} ->
+                    ?DEBUG("request NOT allowed", [], Req4),
+                    {error, unauthorized, Req4}
             end;
         {error, {syntax_error, Error}} ->
-            {error, {syntax_error, Error}, Session2};
+            {error, {syntax_error, Error}, Req2};
         {error, {missing_mandatory_field, Field}} ->
-            {error, {missing_field, Field}, Session2};
+            {error, {missing_field, Field}, Req2};
         {error, Error} ->
-            {error, Error, Session2}
+            {error, Error, Req2}
     end.
 
 
 %% @private
-do_process_req(Req, Session) ->
-    #nkapi_req2{cmd=Cmd} = Req,
-    #nkapi_session{srv_id=SrvId} = Session,
+do_process_req(Req) ->
+    #nkreq{srv_id=SrvId, cmd=Cmd} = Req,
     ?DEBUG("request allowed", [], Req, Session),
-    CmdList = binary:split(Cmd, <<".">>, [global]),
-    case SrvId:api_server_cmd(CmdList, Req, Session) of
-        ok ->
-            {ok, send_unknown(#{}, Req), Session};
-        {ok, Reply} ->
-            {ok, send_unknown(Reply, Req), Session};
-        {ok, Reply, Session2} ->
-            {ok, send_unknown(Reply, Req), Session2};
-        {login, Reply, User, Meta} when User /= <<>> ->
-            Session2 = Session#nkapi_session{user_id = User, user_meta = Meta},
-            {login, send_unknown(Reply, Session2)};
-        {login, Reply, User, Meta, Session2} when User /= <<>> ->
-            Session3 = Session2#nkapi_session{user_id = User, user_meta = Meta},
-            {login, send_unknown(Reply, Session3)};
-        ack ->
-            send_unknown(none, Req),
-            {ack, Session};
-        {ack, Session2} ->
-            send_unknown(none, Req),
-            {ack, Session2};
-        {error, Error} ->
-            {error, Error, Session};
-        {error, Error, Session2} ->
-            {error, Error, Session2}
+    case SrvId:api_server_cmd(Req) of
+        {ok, Reply, Req2} ->
+            {ok, send_unknown(Reply, Req2), Req2};
+        {login, Reply, UserId, Meta, Req2} when UserId /= <<>> ->
+            Req3 = Req2#nkreq{user_id=UserId, user_meta=Meta},
+            {login, send_unknown(Reply, Req3), Req3};
+        {ack, Req2} ->
+            send_unknown(none, Req2),
+            {ack, Req2};
+        {error, Error, Req2} ->
+            {error, Error, Req2}
     end.
 
 
@@ -144,12 +123,12 @@ do_process_req(Req, Session) ->
     {ok, session()}.
 
 process_event(Req, Session) ->
-    #nkapi_req2{data=Data} = Req,
+    #nkreq{data=Data} = Req,
     #nkapi_session{srv_id=SrvId} = Session,
     ?DEBUG("parsing event ~p", [Data], Req, Session),
     case nkevent_util:parse(Data#{srv_id=>SrvId}) of
         {ok, Event} ->
-            Req2 = Req#nkapi_req2{data=Event},
+            Req2 = Req#nkreq{data=Event},
             case SrvId:api_server_allow(Req2, Session) of
                 true ->
                     ?DEBUG("event allowed", [], Req, Session),

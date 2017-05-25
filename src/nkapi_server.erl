@@ -47,13 +47,13 @@
 -define(LLOG(Type, Txt, Args, State),
     lager:Type(
         [
-            {session_id, State#state.session#nkapi_session.session_id},
-            {user_id, State#state.session#nkapi_session.user_id}
+            {session_id, State#state.session_id},
+            {user_id, State#state.user_id}
         ],
         "NkAPI API Server ~s (~s) "++Txt, 
         [
-            State#state.session#nkapi_session.session_id,
-            State#state.session#nkapi_session.user_id
+            State#state.session_id,
+            State#state.user_id
             | Args
         ])).
 
@@ -68,6 +68,7 @@
 -define(CALL_TIMEOUT, 180).     % Maximum sync call time
 
 -include("nkapi.hrl").
+-include_lib("nkservice/include/nkservice.hrl").
 -include_lib("nkevent/include/nkevent.hrl").
 
 
@@ -320,13 +321,18 @@ do_register_http(SessId) ->
 
 -record(state, {
     srv_id :: nkservice:id(),
+    session_id :: nkservice:session_id(),
     trans = #{} :: #{tid() => #trans{}},
     tid = 1 :: integer(),
     ping :: integer() | undefined,
     op_time :: integer(),
     regs = [] :: [#reg{}],
     links :: nklib_links:links(),
-    session :: #nkapi_session{}
+    local :: binary(),
+    remote :: binary(),
+    user_id = <<>> :: nkservice:user_id(),
+    user_meta = #{} :: nkservice:user_meta(),
+    user_state = #{} :: map()
 }).
 
 
@@ -356,21 +362,13 @@ conn_init(NkPort) ->
     {ok, Remote} = nkpacket:get_remote_bin(NkPort),
     SessId = <<"session-", (nklib_util:luid())/binary>>,
     true = nklib_proc:reg({?MODULE, session, SessId}, <<>>),
-    Session = #nkapi_session{
-        srv_id = SrvId,
-        session_id = SessId,
-        session_type = ?MODULE,
-        local = Local,
-        remote = Remote,
-        user_id = <<>>,
-        user_meta = #{},
-        data = #{}
-    },
     State1 = #state{
         srv_id = SrvId,
+        session_id = SessId,
+        local = Local,
+        remote = Remote,
         links = nklib_links:new(),
-        op_time = nkapi_app:get(api_cmd_timeout),
-        session = Session
+        op_time = nkapi_app:get(api_cmd_timeout)
     },
     set_log(State1),
     nkservice_util:register_for_changes(SrvId),
@@ -399,11 +397,11 @@ conn_parse({text, Text}, NkPort, State) ->
             ?MSG("received ~s", [Msg], State),
             Cmd2 = get_cmd(Cmd, Msg),
             Data = maps:get(<<"data">>, Msg, #{}),
-            Req = #nkapi_req2{cmd=Cmd2, data=Data, tid=TId},
+            Req = make_req(Cmd2, Data, TId, State),
             process_client_req(Req, NkPort, State);
         #{<<"cmd">> := <<"event">>, <<"data">> := Data} ->
             ?MSG("received event ~s", [Data], State),
-            Req = #nkapi_req2{cmd = <<"event">>, data=Data},
+            Req = make_req(<<"event">>, Data, <<>>, State),
             process_client_event(Req, State);
         #{<<"result">> := Result, <<"tid">> := TId} ->
             case extract_op(TId, State) of
@@ -494,9 +492,9 @@ conn_handle_cast({nkapi_reply_login, TId, Reply, User, Meta}, NkPort, State) ->
     case extract_op(TId, State) of
         {#trans{op=ack}, State2} ->
             case State of
-                #state{session=#nkapi_session{user_id = <<>>}=Session} ->
-                    Session2 = Session#nkapi_session{user_id=User, user_meta=Meta},
-                    process_login(Reply, TId, NkPort, State#state{session=Session2});
+                #state{user_id = <<>>} ->
+                    State2 = State#state{user_id=User, user_meta=Meta},
+                    process_login(Reply, TId, NkPort, State2);
                 _ ->
                     send_reply_error(already_authenticated, TId, NkPort, State2)
             end;
@@ -671,29 +669,30 @@ conn_stop(Reason, _NkPort, #state{trans=Trans}=State) ->
 %% ===================================================================
 
 %% @private
-process_client_req(Req, NkPort, #state{session=Session}=State) ->
-    case nkapi_server_lib:process_req(Req, Session) of
-        {ok, Reply, Session2} ->
-            send_reply_ok(Reply, Req, NkPort, State#state{session=Session2});
-        {ack, Session2} ->
-            State2 = insert_ack(Req, State#state{session=Session2}),
+process_client_req(Req, NkPort, State) ->
+    case nkapi_server_lib:process_req(Req) of
+        {ok, Reply, #nkreq{state=UserState}} ->
+            send_reply_ok(Reply, Req, NkPort, State#state{user_state=UserState});
+        {ack, #nkreq{state=UserState}} ->
+            State2 = insert_ack(Req, State#state{user_state=UserState}),
             send_ack(Req, NkPort, State2);
-        {login, Reply, Session2} ->
-            case Session of
-                #nkapi_session{user_id = <<>>} ->
-                    process_login(Reply, Req, NkPort, State#state{session=Session2});
+        {login, Reply, #nkreq{user_id=UserId, user_meta=Meta, state=UserState}} ->
+            case State of
+                #state{user_id = <<>>} ->
+                    State2 = State#state{user_id=UserId, user_meta=Meta, user_state=UserState},
+                    process_login(Reply, Req, NkPort, State2);
                 _ ->
                     send_reply_error(already_authenticated, Req, NkPort, State)
             end;
-        {error, Error, Session2} ->
-            send_reply_error(Error, Req, NkPort, State#state{session=Session2})
+        {error, Error, #nkreq{state=UserState}} ->
+            send_reply_error(Error, Req, NkPort, State#state{user_state=UserState})
     end.
 
 
 %% @private
-process_client_event(Req, #state{session=Session}=State) ->
-    {ok, Session2} = nkapi_server_lib:process_event(Req, Session),
-    {ok, State#state{session=Session2}}.
+process_client_event(Req, State) ->
+    {ok, UserState} = nkapi_server_lib:process_event(Req),
+    {ok, State#state{user_state=UserState}}.
 
 
 %% @private
@@ -718,12 +717,34 @@ get_cmd(Cmd, Msg) ->
         _ -> Cmd2
     end.
 
+%% @private
+make_req(Cmd, Data, TId, State) ->
+    #state{
+        srv_id = SrvId,
+        session_id = SessId,
+        user_id = UserId,
+        user_meta = UserMeta,
+        user_state = UserState
+    } = State,
+    #nkreq{
+        srv_id = SrvId,
+        session_module = ?MODULE,
+        session_id = SessId,
+        cmd = Cmd,
+        data = Data,
+        tid = TId,
+        user_id = UserId,
+        user_meta = UserMeta,
+        state = UserState
+    }.
+
+
+
 
 
 %% @private
 process_login(Reply, ReqOrTId, NkPort, State) ->
-    #state{srv_id=SrvId, session=Session} = State,
-    #nkapi_session{session_id=SessId, user_id=UserId, user_meta=Meta} = Session,
+    #state{srv_id=SrvId, session_id=SessId, user_id=UserId, user_meta=Meta} = State,
     nklib_proc:put(?MODULE, {UserId, SessId}),
     nklib_proc:put({?MODULE, SrvId}, {UserId, SessId}),
     nklib_proc:put({?MODULE, user, UserId}, {SessId, Meta}),
@@ -806,7 +827,7 @@ insert_op(TId, Op, From, #state{trans=AllTrans, op_time=Time}=State) ->
 
 
 %% @private
-insert_ack(#nkapi_req2{tid=TId}, State) ->
+insert_ack(#nkreq{tid=TId}, State) ->
     insert_ack(TId, State);
 
 insert_ack(TId, #state{trans=AllTrans}=State) ->
@@ -867,7 +888,7 @@ send_event(Event, NkPort, State) ->
 
 
 %% @private
-send_reply_ok(Data, #nkapi_req2{tid=TId}, NkPort, State) ->
+send_reply_ok(Data, #nkreq{tid=TId}, NkPort, State) ->
     send_reply_ok(Data, TId, NkPort, State);
 
 send_reply_ok(Data, TId, NkPort, State) ->
@@ -884,7 +905,7 @@ send_reply_ok(Data, TId, NkPort, State) ->
 
 
 %% @private
-send_reply_error(Error, #nkapi_req2{tid=TId}, NkPort, State) ->
+send_reply_error(Error, #nkreq{tid=TId}, NkPort, State) ->
     send_reply_error(Error, TId, NkPort, State);
 
 send_reply_error(Error, TId, NkPort, #state{srv_id=SrvId}=State) ->
@@ -901,7 +922,7 @@ send_reply_error(Error, TId, NkPort, #state{srv_id=SrvId}=State) ->
 
 
 %% @private
-send_ack(#nkapi_req2{tid=TId}, NkPort, State) ->
+send_ack(#nkreq{tid=TId}, NkPort, State) ->
     send_ack(TId, NkPort, State);
 
 send_ack(TId, NkPort, State) ->
@@ -928,7 +949,7 @@ send(Msg, NkPort) ->
 
 %% @private
 handle(Fun, Args, State) ->
-    nklib_gen_server:handle_any(Fun, Args, State, #state.srv_id, #state.session).
+    nklib_gen_server:handle_any(Fun, Args, State, #state.srv_id, #state.user_state).
 
 
 %% @private

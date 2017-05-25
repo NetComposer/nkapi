@@ -24,12 +24,11 @@
 -export([plugin_deps/0, plugin_syntax/0, plugin_listen/2]).
 -export([api_error/2, api_error/1]).
 -export([api_server_init/2, api_server_terminate/2, 
-		 api_server_syntax/3, api_server_allow/2, api_server_cmd/2,
          api_server_http_auth/2, api_server_http/4,
-		 api_server_client_event/2, api_server_forward_event/2,
 		 api_server_reg_down/3,
 		 api_server_handle_call/3, api_server_handle_cast/2, 
 		 api_server_handle_info/2, api_server_code_change/3]).
+-export([service_api_syntax/2,service_api_cmd/1]).
 -export_type([continue/0]).
 
 -type continue() :: continue | {continue, list()}.
@@ -180,38 +179,6 @@ api_server_init(_NkPort, State) ->
 	{ok, State}.
 
 
-%% @doc Called to get the syntax for an external API command
-%% Called from nkapi_server_lib
--spec api_server_syntax(nklib_syntax:syntax(), #nkapi_req{}, state()) ->
-    {nklib_syntax:syntax(), #nkapi_req{}, state()}.
-
-api_server_syntax(Syntax, #nkapi_req{class=Class, cmd=Cmd}=Req, State) ->
-    {nkapi_syntax:syntax(Class, Cmd, Syntax), Req, State}.
-
-
-%% @doc Called when a new API command has arrived and called nkapi_api:launch_cmd/6
-%% to authorized the (already parsed) request
-%% For events, class=event and data will contain the event itself
-%% Called from nkapi_server_lib
--spec api_server_allow(#nkapi_req{}, state()) ->
-	{boolean(), state()}.
-
-api_server_allow(_Req, State) ->
-	{false, State}.
-
-
-%% @doc Called when a new API command has arrived and is authorized
-%% For slow requests, reply {ack, state()}
-%% and nkapi_server:reply/2
--spec api_server_cmd(#nkapi_req{}, state()) ->
-	{ok, map(), state()} | {ack, state()} |
-    {login, Reply::term(), User::binary(), Meta::map(), state()} |
-    {error, nkapi:error(), state()}.
-
-api_server_cmd(#nkapi_req{class=Class, cmd=Cmd}=Req, State) ->
-    nkapi_api:cmd(Class, Cmd, Req, State).
-
-
 %%%% @doc Used when the standard login apply
 %%%% Called from nkapi_api or nkapi_server_http
 %%-spec api_server_login(map(), state()) ->
@@ -247,24 +214,16 @@ api_server_http(_Method, _Path, _Req, State) ->
     {http, 404, [], <<"Not Found">>, State}.
 
 
-%% @doc Called when a new event has been received from the client
--spec api_server_client_event(nkevent:event(), state()) ->
-    {ok, map(), state()}.
 
-api_server_client_event(Event, State) ->
-    nkevent:send(Event),
-    {ok, State}.
-	
-
-%% @doc Called when the API server receives an event notification from 
-%% nkevent (because we are subscribed to it).
-%% We can send it to the remote side or ignore it.
--spec api_server_forward_event(nkevent:event(), state()) ->
-	{ok, nkevent:event(), continue()} |
-	{ignore, state()}.
-
-api_server_forward_event(Event, State) ->
-	{ok, Event, State}.
+%%%% @doc Called when the API server receives an event notification from
+%%%% nkevent (because we are subscribed to it).
+%%%% We can send it to the remote side or ignore it.
+%%-spec api_server_forward_event(nkevent:event(), state()) ->
+%%	{ok, nkevent:event(), continue()} |
+%%	{ignore, state()}.
+%%
+%%api_server_forward_event(Event, State) ->
+%%	{ok, Event, State}.
 
 
 %% @doc Called when the service process receives a registered process down
@@ -318,6 +277,22 @@ api_server_terminate(_Reason, State) ->
 	{ok, State}.
 
 
+%% ===================================================================
+%% Service Callbacks
+%% ===================================================================
 
 
+%% @doc
+service_api_syntax(#nkreq{session_module=nkapi_server, cmd=Cmd}=Req, SyntaxAcc) ->
+    {nkapi_api_syntax:syntax(Cmd, SyntaxAcc), Req};
 
+service_api_syntax(_Req, _SyntaxAcc) ->
+    continue.
+
+
+%% @doc
+service_api_cmd(#nkreq{session_module=nkapi_server, cmd=Cmd}=Req) ->
+    nkapi_api_cmd:cmd(Cmd, Req);
+
+service_api_cmd(_Req) ->
+    continue.

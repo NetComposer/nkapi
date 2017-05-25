@@ -18,29 +18,30 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc Default callbacks
--module(nkapi_syntax).
+-module(nkapi_api_syntax).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
--export([syntax/3, events/1]).
+-export([syntax/2]).
 
 
 %% ===================================================================
-%% Syntax
+%% Public functions
 %% ===================================================================
+
 
 %% @private
-syntax(event, subscribe, Syntax) ->
-    S2 = events(Syntax),
-    S2#{type=>[binary, {list, binary}]};
+syntax(<<"event.subscribe">>, Syntax) ->
+    Ev = nkevent_util:syntax(true),
+    maps:merge(Syntax, Ev);
 
-syntax(event, unsubscribe, Syntax) ->
-    S2 = events(Syntax),
-    S2#{type=>[binary, {list, binary}]};
+syntax(<<"event.unsubscribe">>, Syntax) ->
+    Ev = nkevent_util:syntax(true),
+    maps:merge(Syntax, Ev);
 
-syntax(event, send, Syntax) ->
-    events(Syntax);
+syntax(<<"event.send">>, Syntax) ->
+    Ev = nkevent_util:syntax(false),
+    maps:merge(Syntax, Ev);
 
-syntax(event, send_to_user, Syntax) ->
+syntax(<<"event.send_to_user">>, Syntax) ->
     Syntax#{
         user_id => binary,
         type => binary,
@@ -48,7 +49,7 @@ syntax(event, send_to_user, Syntax) ->
         '__mandatory' => [user_id]
     };
 
-syntax(event, send_to_session, Syntax) ->
+syntax(<<"event.send_to_session">>, Syntax) ->
     Syntax#{
         session_id => binary,
         type => binary,
@@ -56,13 +57,13 @@ syntax(event, send_to_session, Syntax) ->
         '__mandatory' => [session_id]
     };
 
-syntax(session, ping, Syntax) ->
+syntax(<<"session.ping">>, Syntax) ->
     Syntax#{time=>integer};
 
-syntax(session, stop, Syntax) ->
+syntax(<<"session.stop">>, Syntax) ->
     Syntax#{session_id => binary};
 
-syntax(session, cmd, Syntax) ->
+syntax(<<"session.cmd">>, Syntax) ->
     Syntax#{
         session_id => binary,
         class => atom,
@@ -72,7 +73,7 @@ syntax(session, cmd, Syntax) ->
         '__mandatory' => [session_id, class, cmd]
     };
 
-syntax(session, log, Syntax) ->
+syntax(<<"session.log">>, Syntax) ->
     Syntax#{
         source => binary,
         message => binary,
@@ -83,28 +84,14 @@ syntax(session, log, Syntax) ->
         '__mandatory' => [source, message]
     };
 
-syntax(session, api_test_async, Syntax) ->
+syntax(<<"session.api_test_async">>, Syntax) ->
     Syntax#{
         data=>any,
         '__mandatory' => [data]
     };
 
-syntax(_Sub, _Cmd, Syntax) ->
+syntax(_Cmd, Syntax) ->
     Syntax.
 
 
-%% ===================================================================
-%% Internal
-%% ===================================================================
 
-
-%% @private
-events(Syntax) ->
-    Syntax#{
-        class => binary,
-        subclass => binary,
-        type => binary,
-        obj_id => binary,
-        body => map,
-        '__mandatory' => [class]
-    }.
