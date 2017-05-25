@@ -23,8 +23,9 @@
 
 -export([cmd/2]).
 
--include("nkservice.hrl").
 -include_lib("nkevent/include/nkevent.hrl").
+-include_lib("nkservice/include/nkservice.hrl").
+
 
 -define(DEBUG(Txt, Args, Req),
     case erlang:get(nkapi_server_debug) of
@@ -83,8 +84,9 @@ cmd(<<"event.unsubscribe">>, #nkreq{data=Data}=Req) ->
     end;
 
 %% Gets [#{class=>...}]
-cmd(<<"event.get_subscriptions">>, #nkreq{tid=TId}=Req) ->
+cmd(<<"event.get_subscriptions">>, Req) ->
     Self = self(),
+    TId = nkapi_server:get_tid(Req),
     spawn_link(
         fun() ->
             Reply = nkapi_server:get_subscriptions(Self),
@@ -147,7 +149,6 @@ cmd(<<"session.cmd">>, #nkreq{data=Data}=Req) ->
             {error, session_not_found, Req}
     end;
 
-%% Default implementation, plugins like GELF implement his
 cmd(<<"session.log">>, #nkreq{data=Data}=Req) ->
     Txt = "API Session Log: ~p",
     case maps:get(level, Data) of
@@ -160,14 +161,14 @@ cmd(<<"session.log">>, #nkreq{data=Data}=Req) ->
     {ok, #{}, Req};
 
 cmd(<<"session.api_test">>, #nkreq{data=#{data:=Data}}=Req) ->
-    {reply, Data, Req};
+    {ok, #{reply=>Data}, Req};
 
-cmd(<<"session.api_test_async">>, #nkreq{tid=TId, data=#{data:=Data}}=Req) ->
+cmd(<<"session.api_test.async">>, #nkreq{data=#{data:=Data}}=Req) ->
     Self = self(),
     spawn_link(
         fun() ->
             timer:sleep(2000),
-            nkapi_server:reply(Self, TId, {ok, #{reply=>Data}})
+            nkapi_server:reply(Self, Req, {ok, #{reply=>Data}})
         end),
     {ack, Req};
 
@@ -182,8 +183,9 @@ cmd(Cmd, Req) ->
 
 
 %% @private
-launch_cmd(#nkreq{data=#{cmd:=Cmd}=Data, tid=TId}=Req, Pid, Self) ->
+launch_cmd(#nkreq{data=#{cmd:=Cmd}=Data}=Req, Pid, Self) ->
     CmdData = maps:get(data, Data, #{}),
+    TId = nkapi_server:get_tid(Req),
     case nkapi_server:cmd(Pid, Cmd, CmdData) of
         {ok, <<"ok">>, ResData} ->
             nkapi_server:reply(Self, TId, {ok, ResData});

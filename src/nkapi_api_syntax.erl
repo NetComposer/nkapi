@@ -66,11 +66,9 @@ syntax(<<"session.stop">>, Syntax) ->
 syntax(<<"session.cmd">>, Syntax) ->
     Syntax#{
         session_id => binary,
-        class => atom,
-        subclass => atom,
-        cmd => atom,
+        cmd => binary,
         data => map,
-        '__mandatory' => [session_id, class, cmd]
+        '__mandatory' => [session_id, cmd]
     };
 
 syntax(<<"session.log">>, Syntax) ->
@@ -84,7 +82,13 @@ syntax(<<"session.log">>, Syntax) ->
         '__mandatory' => [source, message]
     };
 
-syntax(<<"session.api_test_async">>, Syntax) ->
+syntax(<<"session.api_test">>, Syntax) ->
+    Syntax#{
+        data=>any,
+        '__mandatory' => [data]
+    };
+
+syntax(<<"session.api_test.async">>, Syntax) ->
     Syntax#{
         data=>any,
         '__mandatory' => [data]

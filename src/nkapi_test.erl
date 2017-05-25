@@ -29,7 +29,7 @@
 
 -compile(export_all).
 
--include("nkapi.hrl").
+-include_lib("nkservice/include/nkservice.hrl").
 
 %% ===================================================================
 %% Public
@@ -43,7 +43,7 @@ start() ->
         api_server => "wss:all:9010, ws:all:9011/ws, https://all:9010/rpc",
         api_server_timeout => 300,
         debug => [nkapi_client, nkapi_server, nkevent],
-        plugins => [nkapi_log_gelf],
+        %plugins => [nkapi_log_gelf],
         api_gelf_server => "c2.netc.io",
         % To test nkpacket config:
         tls_password => <<"1234">>,
@@ -57,16 +57,14 @@ stop() ->
     nkservice:stop(test).
 
 
-
 login(User) ->
-    Fun = fun ?MODULE:api_client_fun/2,
+    Fun = fun ?MODULE:api_client_fun/1,
     Login = #{
         user => nklib_util:to_binary(User),
         password=> <<"1234">>,
         meta => #{a=>User}
     },
-    {ok, _SessId, _Pid, _Reply} = nkapi_client:start(?SRV, ?WS, Login, Fun, #{}).
-
+    {ok, _Reply, _Pid} = nkapi_client:start(?SRV, ?WS, Login, Fun, #{}, nkapi_test_login).
 
 
 %% @doc Gets all registered users and sessions
@@ -83,14 +81,9 @@ ping() ->
     cmd(session, ping, #{}).
 
 
-
-
 %% @doc
 event_get_subs() ->
-    cmd(event, get_subscriptions, #{}).
-
-
-
+    cmd(<<"event.get_subscriptions">>, #{invalid=>1}).
 
 %% @doc
 event_subscribe() ->
@@ -100,7 +93,7 @@ event_subscribe() ->
     event_subscribe(#{class=>class4, subclass=>s4, type=>t4, obj_id=>o4}).
 
 event_subscribe(Obj) ->
-    cmd(event, subscribe, Obj).
+    cmd(<<"event.subscribe">>, Obj).
 
 
 %% @doc
@@ -111,7 +104,7 @@ event_unsubscribe() ->
     event_unsubscribe(#{class=>class4, subclass=>s4, type=>t4, obj_id=>o4}).
 
 event_unsubscribe(Obj) ->
-    cmd(event, unsubscribe, Obj).
+    cmd(<<"event.unsubscribe">>, Obj).
 
 
 %% @doc
@@ -130,9 +123,9 @@ event_send(T) ->
     end,
     event(Ev).
 
-%% @doc Another way of sending events, as a command
+%% @doc Another way of sending events, as a command (with response)
 event_send2() ->
-    cmd(event, send, #{class=>class1}).
+    cmd(<<"event.send">>, #{class=>class1}).
 
 
 %% @doc
@@ -147,31 +140,36 @@ event_send_session(SessId) ->
 
 %% @doc
 session_stop() ->
-    cmd(session, stop, #{}).
+    cmd(<<"session.stop">>, #{}).
 
 %% @doc
 session_stop(SessId) ->
-    cmd(session, stop, #{session_id => SessId}).
+    cmd(<<"session.stop">>, #{session_id => SessId}).
 
 
-%% @doc
+%% @doc Call back to the client (replied in callback fun bellow)
 session_call(SessId) ->
-    {ok, #{<<"k">> := <<"v">>}} =
-        cmd(session, cmd,
-            #{session_id=>SessId, class=>class1, cmd=>cmd1, data=>#{k=>v}}),
+    {ok, #{<<"client">> := #{<<"value">> := <<"v">>}}} =
+        cmd(<<"session.cmd">>,
+            #{session_id=>SessId, cmd=>"nkapi_test.cmd1", data=>#{value=>v}}),
     {error, {<<"not_implemented">>, <<"Not implemented">>}} =
-        cmd(session, cmd,
-            #{session_id=>SessId, class=>class2, cmd=>cmd1, data=>#{k=>v}}),
+        cmd(<<"session.cmd">>,
+            #{session_id=>SessId, cmd=>"nkapi_test.cmd2", data=>#{value=>v}}),
     ok.
 
 
-test_async() ->
+api_test() ->
     {ok, #{<<"reply">> := #{<<"k">> := 1}}} =
-        cmd(session, api_test_async, #{data=>#{k=>1}}).
+        cmd(<<"session.api_test">>, #{data=>#{k=>1}}).
+
+api_test_async() ->
+    {ok, #{<<"reply">> := #{<<"k">> := 1}}} =
+        cmd(<<"session.api_test.async">>, #{data=>#{k=>1}}).
+
 
 %% @doc
 log(Source, Msg, Data) ->
-    cmd(session, log, Data#{source=>Source, message=>Msg}).
+    cmd(<<"session.log">>, Data#{source=>Source, message=>Msg}).
 
 
 
@@ -246,12 +244,12 @@ get_client() ->
 
 
 %% Test calling with class=test, cmd=op1, op2, data=#{nim=>1}
-cmd(Class, Cmd, Data) ->
+cmd(Cmd, Data) ->
     Pid = get_client(),
-    cmd(Pid, Class, Cmd, Data).
+    cmd(Pid, Cmd, Data).
 
-cmd(Pid, Class, Cmd, Data) ->
-    nkapi_client:cmd(Pid, Class, <<>>, Cmd, Data).
+cmd(Pid, Cmd, Data) ->
+    nkapi_client:cmd(Pid, Cmd, Data).
 
 
 %% Test calling with class=test, cmd=op1, op2, data=#{nim=>1}
@@ -289,48 +287,54 @@ http_cmd(Class, Sub, Cmd, Data) ->
 %% ===================================================================
 
 
-api_client_fun(#nkapi_req{class=event, data=Event}, UserData) ->
+api_client_fun(#nkreq{cmd = <<"event">>, data=Event}=Req) ->
     lager:notice("CLIENT event ~p", [lager:pr(Event, nkevent)]),
-    {ok, UserData};
+    {ok, Req};
 
-api_client_fun(#nkapi_req{class=class1, data=Data}=_Req, UserData) ->
+api_client_fun(#nkreq{cmd = <<"nkapi_test.cmd1">>, data=Data}=Req) ->
     % lager:notice("API REQ: ~p", [lager:pr(_Req, ?MODULE)]),
-    {ok, Data, UserData};
+    {ok, #{client=>Data}, Req};
 
-api_client_fun(_Req, UserData) ->
+api_client_fun(Req) ->
     % lager:error("API REQ: ~p", [lager:pr(_Req, ?MODULE)]),
-    {error, not_implemented, UserData}.
+    {error, not_implemented, Req}.
+
+
 
 
 %% ===================================================================
 %% API callbacks
 %% ===================================================================
 
+plugin_deps() ->
+    [nkapi].
+
+
 
 %% @doc
-api_server_syntax(#nkapi_req{class=test, data=_Data}, Syntax, State) ->
-    {Syntax#{num=>integer}, State};
+service_api_syntax(#nkreq{cmd = <<"nkapi_test_login">>}=Req, Syntax) ->
+    {Syntax#{user=>binary, password=>binary, meta=>map}, Req};
 
-api_server_syntax(_Req, _Syntax, _State) ->
+service_api_syntax(_Req, _Syntax) ->
     continue.
 
 
 %% @doc
-api_server_allow(_Req, State) ->
-    {true, State}.
+service_api_allow(Req) ->
+    {true, Req}.
 
 
 %% @doc Called on any command
-api_server_cmd(#nkapi_req{class=user, cmd=login, data=Data}, State) ->
+service_api_cmd(#nkreq{cmd = <<"nkapi_test_login">>, session_id=SessId, data=Data}=Req) ->
     case Data of
         #{user:=User, password:=<<"1234">>} ->
             Meta = maps:get(meta, Data, #{}),
-            {login, #{login=>ok}, User, Meta, State};
+            {login, #{login=>ok, sess=>SessId}, User, Meta, Req};
         _ ->
-            {error, invalid_user, State}
+            {error, invalid_user, Req}
     end;
 
-api_server_cmd(_Req, _State) ->
+service_api_cmd(_Req) ->
     continue.
 
 

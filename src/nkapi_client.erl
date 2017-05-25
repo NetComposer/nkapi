@@ -22,7 +22,7 @@
 -module(nkapi_client).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
--export([start/5, start/6, cmd/5, event/2, stop/1, stop_all/0]).
+-export([start/5, start/6, cmd/3, event/2, stop/1, stop_all/0]).
 -export([reply_ok/3, reply_error/3]).
 -export([transports/1, default_port/1]).
 -export([conn_init/1, conn_encode/2, conn_parse/3, conn_stop/3]).
@@ -55,6 +55,7 @@
 
 -include("nkapi.hrl").
 -include_lib("nkevent/include/nkevent.hrl").
+-include_lib("nkservice/include/nkservice.hrl").
 
 
 %% ===================================================================
@@ -71,13 +72,13 @@
 
 %% @doc Starts a new session
 -spec start(term(), binary(), map(), function(), term()) ->
-    {ok, SessId::binary(), pid(), Reply::map()} | {error, term()}.
+    {ok, pid(), Reply::map()} | {error, term()}.
 
 start(Srv, Url, Login, Fun, UserData) ->
-    start(Srv, Url, Login, Fun, UserData, user).
+    start(Srv, Url, Login, Fun, UserData, <<"login">>).
 
     
-start(Srv, Url, Login, Fun, UserData, Class) ->
+start(Srv, Url, Login, Fun, UserData, Cmd) ->
     {ok, SrvId} = nkservice_srv:get_srv_id(Srv),
     Debug = case nkservice_util:get_debug_info(SrvId, ?MODULE) of
         {true, #{nkpacket:=true}} -> true;
@@ -94,9 +95,9 @@ start(Srv, Url, Login, Fun, UserData, Class) ->
     },
     case nkpacket:connect(Url, ConnOpts) of
         {ok, Pid} -> 
-            case cmd(Pid, Class, <<>>, login, Login) of
-                {ok, #{<<"session_id">>:=SessId}=Data} ->
-                    {ok, SessId, Pid, Data};
+            case cmd(Pid, Cmd, Login) of
+                {ok, Data} ->
+                    {ok, Data, Pid};
                 {error, Error} ->
                     {error, Error}
             end;
@@ -116,12 +117,11 @@ stop_all() ->
 
 
 %% @doc
--spec cmd(id(), atom(), atom(), atom(), map()) ->
+-spec cmd(id(), binary(), map()) ->
     {ok, map()} | {error, {integer(), binary()}} | {error, term()}.
 
-cmd(Id, Class, Sub, Cmd, Data) ->
-    Req = #nkapi_req{class=Class, subclass=Sub, cmd=Cmd, data=Data},
-    do_call(Id, {cmd, Req}).
+cmd(Id, Cmd, Data) ->
+    do_call(Id, {cmd, nklib_util:to_binary(Cmd), Data}).
 
 
 -spec event(id(), nkevent:event()|map()) ->
@@ -179,9 +179,9 @@ get_user_pids(User) ->
     tid = 1000 :: integer(),
     remote :: binary(),
     callback :: function(),
-    user :: binary(),
-    session_id :: binary(),
-    userdata :: term()
+    user_id :: binary(),
+    user_state :: term(),
+    session_id :: binary()
 }).
 
 
@@ -209,7 +209,7 @@ conn_init(NkPort) ->
         srv_id = SrvId,
         remote = Remote,
         callback = CB,
-        userdata = UserData
+        user_state = UserData
     },
     set_log(State),
     nkservice_util:register_for_changes(SrvId),
@@ -225,7 +225,7 @@ conn_init(NkPort) ->
 conn_parse(close, _NkPort, State) ->
     {ok, State};
 
-conn_parse({text, Text}, NkPort, #state{srv_id=SrvId}=State) ->
+conn_parse({text, Text}, NkPort, State) ->
     Msg = case nklib_json:decode(Text) of
         error ->
             ?LLOG(warning, "JSON decode error: ~p", [Text], State),
@@ -235,20 +235,13 @@ conn_parse({text, Text}, NkPort, #state{srv_id=SrvId}=State) ->
     end,
     ?MSG("received ~s", [Msg], State),
     case Msg of
-        #{<<"class">> := <<"event">>, <<"data">> := Data} ->
-            {ok, Event} = nkevent_util:parse(Data#{srv_id=>SrvId}),
-            process_server_event(Event, State);
-        #{<<"class">> := <<"session">>, <<"cmd">> := <<"ping">>, <<"tid">> := TId} ->
+        #{<<"cmd">> := <<"event">>, <<"data">> := Data} ->
+            process_server_event(Data, State);
+        #{<<"cmd">> := <<"ping">>, <<"tid">> := TId} ->
             send_reply_ok(#{}, TId, NkPort, State);
-        #{<<"class">> := Class, <<"cmd">> := Cmd, <<"tid">> := TId} ->
-            Sub = maps:get(<<"subclass">>, Msg, <<>>),
+        #{<<"cmd">> := Cmd, <<"tid">> := TId} ->
             Data = maps:get(<<"data">>, Msg, #{}),
-            case make_req(Class, Sub, Cmd, Data, TId, State) of
-                {ok, Req} ->
-                    process_server_req(Req, NkPort, State);
-                error ->
-                    send_reply_error(not_implemented, TId, NkPort, State)
-            end;
+            process_server_req(Cmd, Data, TId, NkPort, State);
         #{<<"result">> := Result, <<"tid">> := TId} ->
             case extract_op(TId, State) of
                 {Trans, State2} ->
@@ -293,8 +286,8 @@ conn_encode(Msg, _NkPort) when is_binary(Msg) ->
 -spec conn_handle_call(term(), {pid(), term()}, nkpacket:nkport(), #state{}) ->
     {ok, #state{}} | {stop, Reason::term(), #state{}}.
 
-conn_handle_call({cmd, Req}, From, NkPort, State) ->
-    send_request(Req, From, NkPort, State);
+conn_handle_call({cmd, Cmd, Data}, From, NkPort, State) ->
+    send_request(Cmd, Data, From, NkPort, State);
 
 conn_handle_call(Msg, _From, _NkPort, State) ->
     ?LLOG(error, "unexpected handle_call: ~p", [Msg], State),
@@ -367,39 +360,47 @@ conn_stop(Reason, _NkPort, State) ->
 %% ===================================================================
 
 %% @private
-process_server_req(#nkapi_req{tid=TId}=Req, NkPort, State) ->
-    #state{callback=CB, userdata=UserData, user=User, session_id=SessId} = State,
-    ApiReq = Req#nkapi_req{user_id=User, session_id=SessId},
-    case CB(ApiReq, UserData) of
-        {ok, Reply, UserData2} ->
-            send_reply_ok(Reply, TId, NkPort, State#state{userdata=UserData2});
-        {ack, UserData2} ->
-            send_ack(TId, NkPort, State#state{userdata=UserData2});
-        {error, Error, UserData2} ->
-            send_reply_error(Error, TId, NkPort, State#state{userdata=UserData2})
+process_server_req(Cmd, Data, TId, NkPort, State) ->
+    Req = make_req(Cmd, Data, TId, State),
+    #state{callback=CB} = State,
+    case CB(Req) of
+        {ok, Reply, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            State2 = State#state{user_state=UserState},
+            send_reply_ok(Reply, TId, NkPort, State2);
+        {ack, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            State2 = State#state{user_state=UserState},
+            send_ack(TId, NkPort, State2);
+        {error, Error, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            State2 = State#state{user_state=UserState},
+            send_reply_error(Error, TId, NkPort, State2)
     end.
 
 
 %% @private
-process_server_event(Event, State) ->
-    #state{callback=CB, userdata=UserData, user=User, session_id=SessId} = State,
-    ApiReq = #nkapi_req{class=event, user_id=User, session_id=SessId, data=Event},
-    UserData2 = case CB(ApiReq, UserData) of
-        {ok, UD2}  -> UD2;
-        {ok, _, UD2} -> UD2;
-        {error, _, UD2} -> UD2
-    end,
-    {ok, State#state{userdata=UserData2}}.
+process_server_event(Data, State) ->
+    Req = make_req(<<"event">>, Data, <<>>, State),
+    #state{callback=CB} = State,
+    case CB(Req) of
+        {ok, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            {ok, State#state{user_state=UserState}};
+        {ok, _Reply, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            {ok, State#state{user_state=UserState}}
+    end.
 
 
 %% @private
 process_server_resp(<<"ok">>, Data, #trans{from=From}=Trans, _NkPort, State) ->
     State2 = case Trans of
-        #trans{op=#{cmd:=login, data:=#{user:=User}}} ->
+        #trans{op=#{cmd := <<"login">>, data:=#{user:=User}}} ->
             #{<<"session_id">>:=SessId} = Data,
             nklib_proc:put(?MODULE, User),
             nklib_proc:put({?MODULE, User}),
-            State#state{user=User, session_id=SessId};
+            State#state{user_id=User, session_id=SessId};
         _ ->
             State
     end,
@@ -493,53 +494,43 @@ extend_op(TId, #trans{timer=Timer}=Trans, #state{trans=AllTrans}=State) ->
 
 
 %% @private
-make_req(Class, Sub, Cmd, Data, TId, State) ->
-    try
-        Class2 = nklib_util:to_existing_atom(Class),
-        Sub2 = nklib_util:to_existing_atom(Sub),
-        Cmd2 = nklib_util:to_existing_atom(Cmd),
-        #state{srv_id=SrvId, user=User, session_id=Session} = State,
-        Req = #nkapi_req{
-            srv_id = SrvId,
-            class = Class2,
-            subclass = Sub2,
-            cmd = Cmd2,
-            tid = TId,
-            data = Data, 
-            user_id = User,
-            session_id = Session
-        },
-        {ok, Req}
-    catch
-        _:_ -> error
-    end.
+make_req(Cmd, Data, TId, State) ->
+    #state{
+        srv_id = SrvId,
+        session_id = SessId,
+        user_id = UserId,
+        user_state = UserState
+    } = State,
+    #nkreq{
+        srv_id = SrvId,
+        session_module = ?MODULE,
+        session_id = SessId,
+        session_meta = #{tid=>TId},
+        cmd = Cmd,
+        data = Data,
+        user_id = UserId,
+        user_meta = UserState
+    }.
 
 
 %% @private
-send_request(Req, From, NkPort, #state{tid=TId}=State) ->
-    #nkapi_req{class=Class, subclass=Sub, cmd=Cmd, data=Data} = Req,
+send_request(Cmd, Data, From, NkPort, #state{tid=TId}=State) ->
     Msg1 = #{
-        class => Class,
         cmd => Cmd,
         tid => TId
     },
-    Msg2 = case Sub of
-        <<>> -> Msg1;
-        '' -> Msg1;
-        _ -> Msg1#{subclass=>Sub}
+    Msg2 = case is_map(Data) andalso map_size(Data)>0  of
+        true -> Msg1#{data=>Data};
+        false -> Msg1
     end,
-    Msg3 = case is_map(Data) andalso map_size(Data)>0  of
-        true -> Msg2#{data=>Data};
-        false -> Msg2
-    end,
-    State2 = insert_op(TId, Msg3, From, State),
-    send(Msg3, NkPort, State2#state{tid=TId+1}).
+    State2 = insert_op(TId, Msg2, From, State),
+    send(Msg2, NkPort, State2#state{tid=TId+1}).
 
 
 %% @private
 send_event(#nkevent{}=Event, NkPort, State) ->
     Msg = #{
-        class => event,
+        cmd => event,
         data => nkevent_util:unparse(Event)
     },
     send(Msg, NkPort, State).

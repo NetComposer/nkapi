@@ -23,7 +23,7 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 -export([cmd/3, cmd_async/3, event/2]).
--export([reply/3, reply_login/5, reply_ack/2]).
+-export([reply/3, reply_login/5, reply_ack/2, get_tid/1]).
 -export([stop/1, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
 -export([subscribe/2, unsubscribe/2, unsubscribe_fun/2]).
@@ -33,7 +33,7 @@
 -export([conn_init/1, conn_encode/2, conn_parse/3, conn_handle_call/4, 
          conn_handle_cast/3, conn_handle_info/3, conn_stop/3]).
 -export([get_all/0, get_all/1, print/3]).
-
+-export_type([session_meta/0]).
 
 % To debug, set debug => [nkapi_server]
 % To debug nkpacket, set debug in listener (nkapi_util:get_api_sockets())
@@ -79,6 +79,13 @@
 -type id() :: pid() | nkapi:id().
 
 
+-type session_meta() :: #{
+    tid => integer()
+}.
+
+-type tid() :: integer().
+
+
 %% ===================================================================
 %% Public
 %% ===================================================================
@@ -99,7 +106,7 @@ cmd_async(Id, Cmd, Data) ->
     do_cast(Id, {nkapi_send_req, Cmd, Data}).
 
 
-%% @doc Sends an event directly to the client (as it were subscribed)
+%% @doc Sends an event directly to the client (as it we were subscribed to it)
 %% Response is not expected from remote
 -spec event(id(), map()|#nkevent{}) ->
     ok | {error, term()}.
@@ -114,8 +121,11 @@ event(Id, Data) ->
 
 
 %% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
--spec reply(id(), term(), {ok, map()} | {error, term()}) ->
+-spec reply(id(), tid()|#nkreq{}, {ok, map()} | {error, term()}) ->
     ok.
+
+reply(Id, #nkreq{}=Req, Reply) ->
+    reply(Id, get_tid(Req), Reply);
 
 reply(Id, TId, Reply) ->
     Msg = case Reply of
@@ -136,8 +146,11 @@ reply(Id, TId, Reply) ->
 
 
 %% @doc Sends an "login ok" reply to a command (when you reply 'ack' in callbacks)
--spec reply_login(id(), term(), map(), binary(), map()) ->
+-spec reply_login(id(), tid()|#nkreq{}, map(), binary(), map()) ->
     ok.
+
+reply_login(Id, #nkreq{}=Req, Reply, User, UserMeta) ->
+    reply_login(Id, get_tid(Req), Reply, User, UserMeta);
 
 reply_login(Id, TId, Reply, User, MetaData) ->
     do_cast(Id, {nkapi_reply_login, TId, Reply, User, MetaData}).
@@ -145,12 +158,23 @@ reply_login(Id, TId, Reply, User, MetaData) ->
 
 %% @doc Sends another ACK to a command (when you reply 'ack' in callbacks)
 %% to extend timeout
--spec reply_ack(id(), term()) ->
+-spec reply_ack(id(), tid()|#nkreq{}) ->
     ok.
 
 %% @doc Send to extend the timeout for the transaction 
+reply_ack(Id, #nkreq{}=Req) ->
+    reply_ack(Id, get_tid(Req));
+
 reply_ack(Id, TId) ->
     do_cast(Id, {nkapi_reply_ack, TId}).
+
+
+%% @doc
+-spec get_tid(#nkreq{}) ->
+    tid().
+
+get_tid(#nkreq{session_meta=#{tid:=TId}}) ->
+    TId.
 
 
 %% @doc Start sending pings
@@ -305,8 +329,6 @@ do_register_http(SessId) ->
 %% Protocol callbacks
 %% ===================================================================
 
--type tid() :: integer().
-
 -record(trans, {
     op :: term(),
     timer :: reference(),
@@ -397,12 +419,10 @@ conn_parse({text, Text}, NkPort, State) ->
             ?MSG("received ~s", [Msg], State),
             Cmd2 = get_cmd(Cmd, Msg),
             Data = maps:get(<<"data">>, Msg, #{}),
-            Req = make_req(Cmd2, Data, TId, State),
-            process_client_req(Req, NkPort, State);
+            process_client_req(Cmd2, Data, TId, NkPort, State);
         #{<<"cmd">> := <<"event">>, <<"data">> := Data} ->
             ?MSG("received event ~s", [Data], State),
-            Req = make_req(<<"event">>, Data, <<>>, State),
-            process_client_event(Req, State);
+            process_client_event(Data, State);
         #{<<"result">> := Result, <<"tid">> := TId} ->
             case extract_op(TId, State) of
                 {Trans, State2} ->
@@ -599,17 +619,11 @@ conn_handle_info(nkapi_send_ping, _NkPort, #state{ping=undefined}=State) ->
 
 conn_handle_info(nkapi_send_ping, NkPort, #state{ping=Time}=State) ->
     erlang:send_after(1000*Time, self(), nkapi_send_ping),
-    send_request(ping, data=#{time=>Time}, undefined, NkPort, State);
+    send_request(<<"ping">>, #{time=>Time}, undefined, NkPort, State);
 
-%% This messages is received from nkevent when we receive an event
-%% we are subscribed to.
+%% We receive an event we are subscribed to.
 conn_handle_info({nkevent, Event}, NkPort, State) ->
-    case handle(api_server_forward_event, [Event], State) of
-        {ok, Event2, State2} ->
-            send_event(Event2, NkPort, State2);
-        {ignore, State2} ->
-            {ok, State2}
-    end;
+    send_event(Event, NkPort, State);
 
 conn_handle_info({timeout, _, {nkapi_op_timeout, TId}}, _NkPort, State) ->
     case extract_op(TId, State) of
@@ -669,36 +683,68 @@ conn_stop(Reason, _NkPort, #state{trans=Trans}=State) ->
 %% ===================================================================
 
 %% @private
-process_client_req(Req, NkPort, State) ->
-    case nkapi_server_lib:process_req(Req) of
-        {ok, Reply, #nkreq{state=UserState}} ->
-            send_reply_ok(Reply, Req, NkPort, State#state{user_state=UserState});
-        {ack, #nkreq{state=UserState}} ->
-            State2 = insert_ack(Req, State#state{user_state=UserState}),
-            send_ack(Req, NkPort, State2);
-        {login, Reply, #nkreq{user_id=UserId, user_meta=Meta, state=UserState}} ->
+process_client_req(Cmd, Data, TId, NkPort, State) ->
+    Req = make_req(Cmd, Data, TId, State),
+    case nkservice_api:api(Req) of
+        {ok, Reply, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            Reply2 = set_unknown_fields(Reply, Req2, State),
+            State2 = State#state{user_state=UserState},
+            send_reply_ok(Reply2, TId, NkPort, State2);
+        {ack, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            _ = set_unknown_fields(none, Req2, State),
+            State2 = State#state{user_state=UserState},
+            State3 = insert_ack(TId, State2),
+            send_ack(TId, NkPort, State3);
+        {login, Reply, Req2} ->
+            #nkreq{user_id=UserId, user_meta=Meta, state=UserState} = Req2,
             case State of
                 #state{user_id = <<>>} ->
                     State2 = State#state{user_id=UserId, user_meta=Meta, user_state=UserState},
-                    process_login(Reply, Req, NkPort, State2);
+                    Reply2 = set_unknown_fields(Reply, Req2, State2),
+                    process_login(Reply2, TId, NkPort, State2);
                 _ ->
-                    send_reply_error(already_authenticated, Req, NkPort, State)
+                    send_reply_error(already_authenticated, TId, NkPort, State)
             end;
-        {error, Error, #nkreq{state=UserState}} ->
-            send_reply_error(Error, Req, NkPort, State#state{user_state=UserState})
+        {error, Error, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            State2 = State#state{user_state=UserState},
+            send_reply_error(Error, TId, NkPort, State2)
     end.
 
 
 %% @private
-process_client_event(Req, State) ->
-    {ok, UserState} = nkapi_server_lib:process_event(Req),
-    {ok, State#state{user_state=UserState}}.
+process_client_event(Data, State) ->
+    Req = make_req(<<"event">>, Data, <<>>, State),
+    case nkservice_api:api(Req) of
+        {ok, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            _ = set_unknown_fields(none, Req2, State),
+            {ok, State#state{user_state=UserState}};
+        {error, _Error, Req2} ->
+            #nkreq{state=UserState} = Req2,
+            {ok, State#state{user_state=UserState}}
+    end.
 
 
 %% @private
 process_client_resp(Result, Data, #trans{from=From}, _NkPort, State) ->
     nklib_util:reply(From, {ok, Result, Data}),
     {ok, State}.
+
+
+%% @private
+set_unknown_fields(Reply, #nkreq{unknown_fields=[]}, _State) ->
+    Reply;
+
+set_unknown_fields(Reply, #nkreq{unknown_fields=Fields}, _State) when is_map(Reply) ->
+    BaseUnknowns = maps:get(unknown_fields, Reply, []),
+    Reply#{unknown_fields => lists:usort(BaseUnknowns++Fields)};
+
+set_unknown_fields(_Reply, #nkreq{unknown_fields=Fields, cmd=Cmd}, State) ->
+    Body = #{cmd=>Cmd, fields=>Fields},
+    send_api_event(<<"unrecognized_fields">>, Body, State).
 
 
 
@@ -717,6 +763,7 @@ get_cmd(Cmd, Msg) ->
         _ -> Cmd2
     end.
 
+
 %% @private
 make_req(Cmd, Data, TId, State) ->
     #state{
@@ -730,20 +777,18 @@ make_req(Cmd, Data, TId, State) ->
         srv_id = SrvId,
         session_module = ?MODULE,
         session_id = SessId,
+        session_meta = #{tid=>TId},
         cmd = Cmd,
         data = Data,
-        tid = TId,
         user_id = UserId,
         user_meta = UserMeta,
-        state = UserState
+        state = UserState,
+        debug = get(nkapi_server_debug)
     }.
 
 
-
-
-
 %% @private
-process_login(Reply, ReqOrTId, NkPort, State) ->
+process_login(Reply, TId, NkPort, State) ->
     #state{srv_id=SrvId, session_id=SessId, user_id=UserId, user_meta=Meta} = State,
     nklib_proc:put(?MODULE, {UserId, SessId}),
     nklib_proc:put({?MODULE, SrvId}, {UserId, SessId}),
@@ -762,7 +807,7 @@ process_login(Reply, ReqOrTId, NkPort, State) ->
     },
     subscribe(self(), Event2),
     start_ping(self(), nkapi_app:get(api_ping_timeout)),
-    send_reply_ok(Reply#{session_id=>SessId}, ReqOrTId, NkPort, State).
+    send_reply_ok(Reply, TId, NkPort, State).
 
 
 %% @private
@@ -827,9 +872,6 @@ insert_op(TId, Op, From, #state{trans=AllTrans, op_time=Time}=State) ->
 
 
 %% @private
-insert_ack(#nkreq{tid=TId}, State) ->
-    insert_ack(TId, State);
-
 insert_ack(TId, #state{trans=AllTrans}=State) ->
     Trans = #trans{
         op = ack,
@@ -878,19 +920,29 @@ send_request(Cmd, Data, From, NkPort, #state{tid=TId}=State) ->
 
 
 %% @private
+send_api_event(Type, Body, #state{srv_id=SrvId, session_id=SessId}) ->
+    Event = #nkevent{
+        srv_id = SrvId,
+        class = <<"api">>,
+        subclass = <<"session">>,
+        type = Type,
+        obj_id = SessId,
+        body = Body
+    },
+    event(self(), Event).
+
+
+%% @private
 send_event(Event, NkPort, State) ->
     #state{srv_id=_SrvId} = State,
     Msg = #{
-        class => event,
+        cmd => <<"event">>,
         data => nkevent_util:unparse(Event)
     },
     send(Msg, NkPort, State).
 
 
 %% @private
-send_reply_ok(Data, #nkreq{tid=TId}, NkPort, State) ->
-    send_reply_ok(Data, TId, NkPort, State);
-
 send_reply_ok(Data, TId, NkPort, State) ->
     Msg1 = #{
         result => ok,
@@ -905,9 +957,6 @@ send_reply_ok(Data, TId, NkPort, State) ->
 
 
 %% @private
-send_reply_error(Error, #nkreq{tid=TId}, NkPort, State) ->
-    send_reply_error(Error, TId, NkPort, State);
-
 send_reply_error(Error, TId, NkPort, #state{srv_id=SrvId}=State) ->
     {Code, Text} = nkapi_util:api_error(SrvId, Error),
     Msg = #{
@@ -922,9 +971,6 @@ send_reply_error(Error, TId, NkPort, #state{srv_id=SrvId}=State) ->
 
 
 %% @private
-send_ack(#nkreq{tid=TId}, NkPort, State) ->
-    send_ack(TId, NkPort, State);
-
 send_ack(TId, NkPort, State) ->
     Msg = #{ack => TId},
     send(Msg, NkPort, State).

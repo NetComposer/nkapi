@@ -288,25 +288,25 @@ process({http, Code, Hds, Body, State}) ->
 process({rpc, State}) ->
     #state{srv_id=SrvId, user=User, session_id=SessId, user_state=UserState} = State,
     case get_body(State, #{max_size=>100000, parse=>true}) of
-        #{<<"class">>:=Class, <<"cmd">>:=Cmd} = Body ->
+        #{<<"cmd">>:=Cmd} = Body ->
             TId = erlang:phash2(make_ref()),
-            ApiReq = #nkapi_req{
+            ApiReq = #nkreq{
                 srv_id = SrvId,
-                class = Class,
-                subclass = maps:get(<<"subclass">>, Body, <<>>),
                 cmd = Cmd,
-                tid = TId,
-                data = maps:get(<<"data">>, Body, #{}), 
+                data = maps:get(<<"data">>, Body, #{}),
                 user_id = User,
-                session_id = SessId
+                session_id = SessId,
+                session_module = ?MODULE,
+                session_meta = #{tid => TId},
+                state = UserState
             },
-            case nkapi_server_lib:process_req(ApiReq, UserState) of
-                {ok, Reply, UserState2} ->
+            case nkservice_api:api(ApiReq) of
+                {ok, Reply, #nkreq{state=UserState2}} ->
                     send_msg_ok(Reply, State#state{user_state=UserState2});
-                {ack, UserState2} ->
+                {ack, #nkreq{state=UserState2}} ->
                     nkapi_server:do_register_http(SessId),
                     ack_wait(TId, State#state{user_state=UserState2});
-                {error, Error, UserState2} ->
+                {error, Error, #nkreq{state=UserState2}} ->
                     send_msg_error(Error, State#state{user_state=UserState2})
             end;
         _ ->

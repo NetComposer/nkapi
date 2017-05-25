@@ -49,7 +49,6 @@ plugin_deps() ->
 	[].
 
 
-
 %% @doc This function, if implemented, can offer a nklib_config:syntax()
 %% that will be checked against service configuration. Entries passing will be
 %% updated on the configuration with their parsed values
