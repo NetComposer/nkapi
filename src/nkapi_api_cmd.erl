@@ -21,7 +21,7 @@
 -module(nkapi_api_cmd).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
--export([cmd/2]).
+-export([cmd/3]).
 
 -include_lib("nkevent/include/nkevent.hrl").
 -include_lib("nkservice/include/nkservice.hrl").
@@ -62,29 +62,30 @@
 
 
 %% @doc
--spec cmd(binary(), req()) ->
-    {ok, Reply::map(), req()} | {ack, req()} |
-    {login, Reply::map(), User::nkservice:user_id(), Meta::nkservice:user_meta(), req()} |
+-spec cmd(binary(), req(), state()) ->
+    {ok, Reply::map(), state()} |
+    {ack, state()} |
+    {login, Reply::map(), User::nkservice:user_id(), Meta::nkservice:user_meta(), state()} |
     {error, nkservice:error(), state()}.
 
-cmd(<<"event.subscribe">>, #nkreq{data=Data}=Req) ->
+cmd(<<"event.subscribe">>, #nkreq{data=Data}, State) ->
     case nkapi_server:subscribe(self(), Data) of
         ok ->
-            {ok, #{}, Req};
+            {ok, #{}, State};
         {error, Error} ->
-            {error, Error, Req}
+            {error, Error, State}
     end;
 
-cmd(<<"event.unsubscribe">>, #nkreq{data=Data}=Req) ->
+cmd(<<"event.unsubscribe">>, #nkreq{data=Data}, State) ->
     case nkapi_server:unsubscribe(self(), Data) of
         ok ->
-            {ok, #{}, Req};
+            {ok, #{}, State};
         {error, Error} ->
-            {error, Error, Req}
+            {error, Error, State}
     end;
 
 %% Gets [#{class=>...}]
-cmd(<<"event.get_subscriptions">>, Req) ->
+cmd(<<"event.get_subscriptions">>, Req, State) ->
     Self = self(),
     TId = nkapi_server:get_tid(Req),
     spawn_link(
@@ -92,17 +93,17 @@ cmd(<<"event.get_subscriptions">>, Req) ->
             Reply = nkapi_server:get_subscriptions(Self),
             nkapi_server:reply(Self, TId, {ok, Reply})
         end),
-    {ack, Req};
+    {ack, State};
 
-cmd(<<"event.send">>, #nkreq{data=Data}=Req) ->
+cmd(<<"event.send">>, #nkreq{data=Data}, State) ->
     case nkapi_server:event(self(), Data) of
         ok ->
-            {ok, #{}, Req};
+            {ok, #{}, State};
         {error, Error} ->
-            {error, Error, Req}
+            {error, Error, State}
     end;
 
-cmd(<<"event.send_to_user">>, #nkreq{srv_id=SrvId, data=Data}=Req) ->
+cmd(<<"event.send_to_user">>, #nkreq{srv_id=SrvId, data=Data}, State) ->
     #{user_id:=UserId} = Data,
     Event = #nkevent{
         class = <<"api">>,
@@ -114,42 +115,42 @@ cmd(<<"event.send_to_user">>, #nkreq{srv_id=SrvId, data=Data}=Req) ->
     },
     case nkevent:send(Event) of
         ok ->
-            {ok, #{}, Req};
+            {ok, #{}, State};
         {error, Error} ->
-            {error, Error, Req}
+            {error, Error, State}
     end;
 
-cmd(<<"session.ping">>, Req) ->
-    {ok, #{now=>nklib_util:m_timestamp()}, Req};
+cmd(<<"session.ping">>, _Req, State) ->
+    {ok, #{now=>nklib_util:m_timestamp()}, State};
 
-cmd(<<"session.stop">>, #nkreq{data=Data}=Req) ->
+cmd(<<"session.stop">>, #nkreq{data=Data}, State) ->
     case Data of
         #{session_id:=SessId} ->
             %% TODO: check if authorized
             case nkapi_server:find_session(SessId) of
                 {ok, _User, Pid} ->
                     nkapi_server:stop(Pid),
-                    {ok, #{}, Req};
+                    {ok, #{}, State};
                 not_found ->
-                    {error, session_not_found, Req}
+                    {error, session_not_found, State}
             end;
         _ ->
             nkapi_server:stop(self()),
-            {ok, #{}, Req}
+            {ok, #{}, State}
     end;
 
-cmd(<<"session.cmd">>, #nkreq{data=Data}=Req) ->
+cmd(<<"session.cmd">>, #nkreq{data=Data}=Req, State) ->
     #{session_id:=SessId} = Data,
     case nkapi_server:find_session(SessId) of
         {ok, _User, Pid} ->
             Self = self(),
             _ = spawn_link(fun() -> launch_cmd(Req, Pid, Self) end),
-            {ack, Req};
+            {ack, State};
         not_found ->
-            {error, session_not_found, Req}
+            {error, session_not_found, State}
     end;
 
-cmd(<<"session.log">>, #nkreq{data=Data}=Req) ->
+cmd(<<"session.log">>, #nkreq{data=Data}, State) ->
     Txt = "API Session Log: ~p",
     case maps:get(level, Data) of
         7 -> lager:debug(Txt, [Data]);
@@ -158,23 +159,23 @@ cmd(<<"session.log">>, #nkreq{data=Data}=Req) ->
         4 -> lager:warning(Txt, [Data]);
         _ -> lager:error(Txt, [Data])
     end,
-    {ok, #{}, Req};
+    {ok, #{}, State};
 
-cmd(<<"session.api_test">>, #nkreq{data=#{data:=Data}}=Req) ->
-    {ok, #{reply=>Data}, Req};
+cmd(<<"session.api_test">>, #nkreq{data=#{data:=Data}}, State) ->
+    {ok, #{reply=>Data}, State};
 
-cmd(<<"session.api_test.async">>, #nkreq{data=#{data:=Data}}=Req) ->
+cmd(<<"session.api_test.async">>, #nkreq{data=#{data:=Data}}=Req, State) ->
     Self = self(),
     spawn_link(
         fun() ->
             timer:sleep(2000),
             nkapi_server:reply(Self, Req, {ok, #{reply=>Data}})
         end),
-    {ack, Req};
+    {ack, State};
 
-cmd(Cmd, Req) ->
-    ?LLOG(notice, "command not implemented: ~s", [Cmd], Req),
-    {error, not_implemented, Req}.
+cmd(Cmd, _Req, State) ->
+    ?LLOG(notice, "command not implemented: ~s", [Cmd], State),
+    {error, not_implemented, State}.
 
 
 %% ===================================================================

@@ -362,19 +362,16 @@ conn_stop(Reason, _NkPort, State) ->
 %% @private
 process_server_req(Cmd, Data, TId, NkPort, State) ->
     Req = make_req(Cmd, Data, TId, State),
-    #state{callback=CB} = State,
-    case CB(Req) of
-        {ok, Reply, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            State2 = State#state{user_state=UserState},
+    #state{callback=CB, user_state=UserState} = State,
+    case CB(Req, UserState) of
+        {ok, Reply, UserState2} ->
+            State2 = State#state{user_state=UserState2},
             send_reply_ok(Reply, TId, NkPort, State2);
-        {ack, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            State2 = State#state{user_state=UserState},
+        {ack, UserState2} ->
+            State2 = State#state{user_state=UserState2},
             send_ack(TId, NkPort, State2);
-        {error, Error, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            State2 = State#state{user_state=UserState},
+        {error, Error, UserState2} ->
+            State2 = State#state{user_state=UserState2},
             send_reply_error(Error, TId, NkPort, State2)
     end.
 
@@ -382,14 +379,12 @@ process_server_req(Cmd, Data, TId, NkPort, State) ->
 %% @private
 process_server_event(Data, State) ->
     Req = make_req(<<"event">>, Data, <<>>, State),
-    #state{callback=CB} = State,
-    case CB(Req) of
-        {ok, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            {ok, State#state{user_state=UserState}};
-        {ok, _Reply, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            {ok, State#state{user_state=UserState}}
+    #state{callback=CB, user_state = UserState} = State,
+    case CB(Req, UserState) of
+        {ok, UserState2} ->
+            {ok, State#state{user_state=UserState2}};
+        {ok, _Reply, UserState2} ->
+            {ok, State#state{user_state=UserState2}}
     end.
 
 

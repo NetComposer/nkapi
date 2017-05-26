@@ -286,7 +286,7 @@ process({http, Code, Hds, Body, State}) ->
     send_http_reply(Code, Hds, Body, State);
 
 process({rpc, State}) ->
-    #state{srv_id=SrvId, user=User, session_id=SessId, user_state=UserState} = State,
+    #state{srv_id=SrvId, user=User, session_id=SessId, user_state=_UserState} = State,
     case get_body(State, #{max_size=>100000, parse=>true}) of
         #{<<"cmd">>:=Cmd} = Body ->
             TId = erlang:phash2(make_ref()),
@@ -297,17 +297,17 @@ process({rpc, State}) ->
                 user_id = User,
                 session_id = SessId,
                 session_module = ?MODULE,
-                session_meta = #{tid => TId},
-                state = UserState
+                session_meta = #{tid => TId}
+                %req_state = _UserState
             },
-            case nkservice_api:api(ApiReq) of
-                {ok, Reply, #nkreq{state=UserState2}} ->
-                    send_msg_ok(Reply, State#state{user_state=UserState2});
-                {ack, #nkreq{state=UserState2}} ->
+            case nkservice_api:api(ApiReq, State) of
+                {ok, Reply, State2} ->
+                    send_msg_ok(Reply, State2);
+                {ack, State2} ->
                     nkapi_server:do_register_http(SessId),
-                    ack_wait(TId, State#state{user_state=UserState2});
-                {error, Error, #nkreq{state=UserState2}} ->
-                    send_msg_error(Error, State#state{user_state=UserState2})
+                    ack_wait(TId, State2);
+                {error, Error, State2} ->
+                    send_msg_error(Error, State2)
             end;
         _ ->
             send_http_reply(400, [], <<>>, State)

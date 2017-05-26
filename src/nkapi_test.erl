@@ -58,7 +58,7 @@ stop() ->
 
 
 login(User) ->
-    Fun = fun ?MODULE:api_client_fun/1,
+    Fun = fun ?MODULE:api_client_fun/2,
     Login = #{
         user => nklib_util:to_binary(User),
         password=> <<"1234">>,
@@ -78,7 +78,7 @@ get_sessions(User) ->
 
 
 ping() ->
-    cmd(session, ping, #{}).
+    cmd(<<"session.ping">>, #{}).
 
 
 %% @doc
@@ -287,17 +287,17 @@ http_cmd(Class, Sub, Cmd, Data) ->
 %% ===================================================================
 
 
-api_client_fun(#nkreq{cmd = <<"event">>, data=Event}=Req) ->
+api_client_fun(#nkreq{cmd = <<"event">>, data=Event}, State) ->
     lager:notice("CLIENT event ~p", [lager:pr(Event, nkevent)]),
-    {ok, Req};
+    {ok, State};
 
-api_client_fun(#nkreq{cmd = <<"nkapi_test.cmd1">>, data=Data}=Req) ->
+api_client_fun(#nkreq{cmd = <<"nkapi_test.cmd1">>, data=Data}, State) ->
     % lager:notice("API REQ: ~p", [lager:pr(_Req, ?MODULE)]),
-    {ok, #{client=>Data}, Req};
+    {ok, #{client=>Data}, State};
 
-api_client_fun(Req) ->
+api_client_fun(_Req, State) ->
     % lager:error("API REQ: ~p", [lager:pr(_Req, ?MODULE)]),
-    {error, not_implemented, Req}.
+    {error, not_implemented, State}.
 
 
 
@@ -312,29 +312,29 @@ plugin_deps() ->
 
 
 %% @doc
-service_api_syntax(#nkreq{cmd = <<"nkapi_test_login">>}=Req, Syntax) ->
+service_api_syntax(Syntax, #nkreq{cmd = <<"nkapi_test_login">>}=Req) ->
     {Syntax#{user=>binary, password=>binary, meta=>map}, Req};
 
-service_api_syntax(_Req, _Syntax) ->
+service_api_syntax(_Syntax, _Req) ->
     continue.
 
 
 %% @doc
-service_api_allow(Req) ->
-    {true, Req}.
+service_api_allow(_Req, State) ->
+    {true, State}.
 
 
 %% @doc Called on any command
-service_api_cmd(#nkreq{cmd = <<"nkapi_test_login">>, session_id=SessId, data=Data}=Req) ->
+service_api_cmd(#nkreq{cmd = <<"nkapi_test_login">>, session_id=SessId, data=Data}, State) ->
     case Data of
         #{user:=User, password:=<<"1234">>} ->
             Meta = maps:get(meta, Data, #{}),
-            {login, #{login=>ok, sess=>SessId}, User, Meta, Req};
+            {login, #{login=>ok, sess=>SessId}, User, Meta, State};
         _ ->
-            {error, invalid_user, Req}
+            {error, invalid_user, State}
     end;
 
-service_api_cmd(_Req) ->
+service_api_cmd(_Req, _State) ->
     continue.
 
 

@@ -28,7 +28,7 @@
 		 api_server_reg_down/3,
 		 api_server_handle_call/3, api_server_handle_cast/2, 
 		 api_server_handle_info/2, api_server_code_change/3]).
--export([service_api_syntax/2,service_api_cmd/1]).
+-export([service_api_syntax/2,service_api_cmd/2]).
 -export_type([continue/0]).
 
 -type continue() :: continue | {continue, list()}.
@@ -282,16 +282,16 @@ api_server_terminate(_Reason, State) ->
 
 
 %% @doc
-service_api_syntax(#nkreq{session_module=nkapi_server, cmd=Cmd}=Req, SyntaxAcc) ->
+service_api_syntax(SyntaxAcc, #nkreq{session_module=nkapi_server, cmd=Cmd}=Req) ->
     {nkapi_api_syntax:syntax(Cmd, SyntaxAcc), Req};
 
-service_api_syntax(_Req, _SyntaxAcc) ->
+service_api_syntax(_SyntaxAcc, _Req) ->
     continue.
 
 
 %% @doc
-service_api_cmd(#nkreq{session_module=nkapi_server, cmd=Cmd}=Req) ->
-    nkapi_api_cmd:cmd(Cmd, Req);
+service_api_cmd(#nkreq{session_module=nkapi_server, cmd=Cmd}=Req, State) ->
+    nkapi_api_cmd:cmd(Cmd, Req, State);
 
-service_api_cmd(_Req) ->
+service_api_cmd(_Req, _State) ->
     continue.

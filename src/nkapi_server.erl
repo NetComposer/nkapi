@@ -91,7 +91,7 @@
 %% ===================================================================
 
 %% @doc Send a command to the client and wait a response
--spec cmd(id(), nkapi:cmd(), nkapi:data()) ->
+-spec cmd(id(), nkservice:req_cmd(), nkapi:data()) ->
     {ok, Result::binary(), Data::map()} | {error, term()}.
 
 cmd(Id, Cmd, Data) ->
@@ -99,7 +99,7 @@ cmd(Id, Cmd, Data) ->
 
 
 %% @doc Send a command and don't wait for a response
--spec cmd_async(id(), nkapi:cmd(), nkapi:data()) ->
+-spec cmd_async(id(), nkservice:req_cmd(), nkapi:data()) ->
     ok | {error, term()}.
 
 cmd_async(Id, Cmd, Data) ->
@@ -683,48 +683,41 @@ conn_stop(Reason, _NkPort, #state{trans=Trans}=State) ->
 %% ===================================================================
 
 %% @private
-process_client_req(Cmd, Data, TId, NkPort, State) ->
+process_client_req(Cmd, Data, TId, NkPort, #state{user_state=UserState}=State) ->
     Req = make_req(Cmd, Data, TId, State),
-    case nkservice_api:api(Req) of
-        {ok, Reply, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            Reply2 = set_unknown_fields(Reply, Req2, State),
-            State2 = State#state{user_state=UserState},
+    case nkservice_api:api(Req, UserState) of
+        {ok, Reply, Unknown, UserState2} ->
+            Reply2 = set_unknown_fields(Reply, Unknown, Req),
+            State2 = State#state{user_state=UserState2},
             send_reply_ok(Reply2, TId, NkPort, State2);
-        {ack, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            _ = set_unknown_fields(none, Req2, State),
-            State2 = State#state{user_state=UserState},
+        {ack, Unknown, UserState2} ->
+            _ = set_unknown_fields(none, Unknown, Req),
+            State2 = State#state{user_state=UserState2},
             State3 = insert_ack(TId, State2),
             send_ack(TId, NkPort, State3);
-        {login, Reply, Req2} ->
-            #nkreq{user_id=UserId, user_meta=Meta, state=UserState} = Req2,
+        {login, Reply, UserId, Meta, Unknown, UserState2} ->
             case State of
                 #state{user_id = <<>>} ->
-                    State2 = State#state{user_id=UserId, user_meta=Meta, user_state=UserState},
-                    Reply2 = set_unknown_fields(Reply, Req2, State2),
+                    State2 = State#state{user_id=UserId, user_meta=Meta, user_state=UserState2},
+                    Reply2 = set_unknown_fields(Reply, Unknown, Req),
                     process_login(Reply2, TId, NkPort, State2);
                 _ ->
                     send_reply_error(already_authenticated, TId, NkPort, State)
             end;
-        {error, Error, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            State2 = State#state{user_state=UserState},
+        {error, Error, UserState2} ->
+            State2 = State#state{user_state=UserState2},
             send_reply_error(Error, TId, NkPort, State2)
     end.
 
 
 %% @private
-process_client_event(Data, State) ->
+process_client_event(Data, #state{user_state=UserState}=State) ->
     Req = make_req(<<"event">>, Data, <<>>, State),
-    case nkservice_api:api(Req) of
-        {ok, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            _ = set_unknown_fields(none, Req2, State),
-            {ok, State#state{user_state=UserState}};
-        {error, _Error, Req2} ->
-            #nkreq{state=UserState} = Req2,
-            {ok, State#state{user_state=UserState}}
+    case nkservice_api:event(Req, UserState) of
+        {ok, UserState2} ->
+            {ok, State#state{user_state=UserState2}};
+        {error, _Error, UserState2} ->
+            {ok, State#state{user_state=UserState2}}
     end.
 
 
@@ -735,16 +728,16 @@ process_client_resp(Result, Data, #trans{from=From}, _NkPort, State) ->
 
 
 %% @private
-set_unknown_fields(Reply, #nkreq{unknown_fields=[]}, _State) ->
+set_unknown_fields(Reply, [], _Req) ->
     Reply;
 
-set_unknown_fields(Reply, #nkreq{unknown_fields=Fields}, _State) when is_map(Reply) ->
+set_unknown_fields(Reply, Fields, _Req) when is_map(Reply) ->
     BaseUnknowns = maps:get(unknown_fields, Reply, []),
     Reply#{unknown_fields => lists:usort(BaseUnknowns++Fields)};
 
-set_unknown_fields(_Reply, #nkreq{unknown_fields=Fields, cmd=Cmd}, State) ->
+set_unknown_fields(_Reply, Fields, #nkreq{cmd=Cmd}=Req) ->
     Body = #{cmd=>Cmd, fields=>Fields},
-    send_api_event(<<"unrecognized_fields">>, Body, State).
+    send_api_event(<<"unrecognized_fields">>, Body, Req).
 
 
 
@@ -771,18 +764,18 @@ make_req(Cmd, Data, TId, State) ->
         session_id = SessId,
         user_id = UserId,
         user_meta = UserMeta,
-        user_state = UserState
+        local = Local,
+        remote = Remote
     } = State,
     #nkreq{
         srv_id = SrvId,
         session_module = ?MODULE,
         session_id = SessId,
-        session_meta = #{tid=>TId},
+        session_meta = #{tid=>TId, local=>Local, remote=>Remote},
         cmd = Cmd,
         data = Data,
         user_id = UserId,
         user_meta = UserMeta,
-        state = UserState,
         debug = get(nkapi_server_debug)
     }.
 
@@ -920,7 +913,7 @@ send_request(Cmd, Data, From, NkPort, #state{tid=TId}=State) ->
 
 
 %% @private
-send_api_event(Type, Body, #state{srv_id=SrvId, session_id=SessId}) ->
+send_api_event(Type, Body, #nkreq{srv_id=SrvId, session_id=SessId}) ->
     Event = #nkevent{
         srv_id = SrvId,
         class = <<"api">>,
