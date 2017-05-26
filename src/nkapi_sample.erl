@@ -19,7 +19,7 @@
 %% -------------------------------------------------------------------
 
 %% @doc 
--module(nkapi_test).
+-module(nkapi_sample).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 -define(SRV, test).
