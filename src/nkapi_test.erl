@@ -78,12 +78,12 @@ get_sessions(User) ->
 
 
 ping() ->
-    cmd(<<"session.ping">>, #{}).
+    cmd(<<"session/ping">>, #{}).
 
 
 %% @doc
 event_get_subs() ->
-    cmd(<<"event.get_subscriptions">>, #{invalid=>1}).
+    cmd(<<"event/get_subscriptions">>, #{invalid=>1}).
 
 %% @doc
 event_subscribe() ->
@@ -93,7 +93,7 @@ event_subscribe() ->
     event_subscribe(#{class=>class4, subclass=>s4, type=>t4, obj_id=>o4}).
 
 event_subscribe(Obj) ->
-    cmd(<<"event.subscribe">>, Obj).
+    cmd(<<"event/subscribe">>, Obj).
 
 
 %% @doc
@@ -104,7 +104,7 @@ event_unsubscribe() ->
     event_unsubscribe(#{class=>class4, subclass=>s4, type=>t4, obj_id=>o4}).
 
 event_unsubscribe(Obj) ->
-    cmd(<<"event.unsubscribe">>, Obj).
+    cmd(<<"event/unsubscribe">>, Obj).
 
 
 %% @doc
@@ -125,7 +125,7 @@ event_send(T) ->
 
 %% @doc Another way of sending events, as a command (with response)
 event_send2() ->
-    cmd(<<"event.send">>, #{class=>class1}).
+    cmd(<<"event/send">>, #{class=>class1}).
 
 
 %% @doc
@@ -140,36 +140,36 @@ event_send_session(SessId) ->
 
 %% @doc
 session_stop() ->
-    cmd(<<"session.stop">>, #{}).
+    cmd(<<"session/stop">>, #{}).
 
 %% @doc
 session_stop(SessId) ->
-    cmd(<<"session.stop">>, #{session_id => SessId}).
+    cmd(<<"session/stop">>, #{session_id => SessId}).
 
 
 %% @doc Call back to the client (replied in callback fun bellow)
 session_call(SessId) ->
     {ok, #{<<"client">> := #{<<"value">> := <<"v">>}}} =
-        cmd(<<"session.cmd">>,
+        cmd(<<"session/cmd">>,
             #{session_id=>SessId, cmd=>"nkapi_test.cmd1", data=>#{value=>v}}),
     {error, {<<"not_implemented">>, <<"Not implemented">>}} =
-        cmd(<<"session.cmd">>,
+        cmd(<<"session/cmd">>,
             #{session_id=>SessId, cmd=>"nkapi_test.cmd2", data=>#{value=>v}}),
     ok.
 
 
 api_test() ->
     {ok, #{<<"reply">> := #{<<"k">> := 1}}} =
-        cmd(<<"session.api_test">>, #{data=>#{k=>1}}).
+        cmd(<<"session/api_test">>, #{data=>#{k=>1}}).
 
 api_test_async() ->
     {ok, #{<<"reply">> := #{<<"k">> := 1}}} =
-        cmd(<<"session.api_test.async">>, #{data=>#{k=>1}}).
+        cmd(<<"session/api_test.async">>, #{data=>#{k=>1}}).
 
 
 %% @doc
 log(Source, Msg, Data) ->
-    cmd(<<"session.log">>, Data#{source=>Source, message=>Msg}).
+    cmd(<<"session/log">>, Data#{source=>Source, message=>Msg}).
 
 
 
