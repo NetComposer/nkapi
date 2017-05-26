@@ -748,11 +748,11 @@ set_unknown_fields(_Reply, Fields, #nkreq{cmd=Cmd}=Req) ->
 %% @private
 get_cmd(Cmd, Msg) ->
     Cmd2 = case Msg of
-        #{<<"subclass">> := Sub} -> <<Sub/binary, $., Cmd/binary>>;
+        #{<<"subclass">> := Sub} -> <<Sub/binary, $/, Cmd/binary>>;
         _ -> Cmd
     end,
     case Msg of
-        #{<<"class">> := Class} -> <<Class/binary, $., Cmd2/binary>>;
+        #{<<"class">> := Class} -> <<Class/binary, $/, Cmd2/binary>>;
         _ -> Cmd2
     end.
 
@@ -951,7 +951,7 @@ send_reply_ok(Data, TId, NkPort, State) ->
 
 %% @private
 send_reply_error(Error, TId, NkPort, #state{srv_id=SrvId}=State) ->
-    {Code, Text} = nkapi_util:api_error(SrvId, Error),
+    {Code, Text} = nkservice_util:error(SrvId, Error),
     Msg = #{
         result => error,
         tid => TId,

@@ -546,7 +546,7 @@ send_reply_ok(Data, TId, NkPort, State) ->
 
 %% @private
 send_reply_error(Error, TId, NkPort, #state{srv_id=SrvId}=State) ->
-    {Code, Text} = nkapi_util:api_error(SrvId, Error),
+    {Code, Text} = nkservice_util:error(SrvId, Error),
     Msg = #{
         result => error,
         tid => TId,

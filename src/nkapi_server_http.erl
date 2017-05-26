@@ -340,7 +340,7 @@ send_msg_ok(Reply, State) ->
 
 %% @private
 send_msg_error(Error, #state{srv_id=SrvId}=State) ->
-    {Code, Text} = nkapi_util:api_error(SrvId, Error),
+    {Code, Text} = nkservice_util:error(SrvId, Error),
     Msg = #{
         result => error,
         data => #{ 

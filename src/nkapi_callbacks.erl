@@ -22,8 +22,7 @@
 -module(nkapi_callbacks).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 -export([plugin_deps/0, plugin_syntax/0, plugin_listen/2]).
--export([api_error/2, api_error/1]).
--export([api_server_init/2, api_server_terminate/2, 
+-export([api_server_init/2, api_server_terminate/2,
          api_server_http_auth/2, api_server_http/4,
 		 api_server_reg_down/3,
 		 api_server_handle_call/3, api_server_handle_cast/2, 
@@ -83,80 +82,6 @@ plugin_listen(Config, #{id:=SrvId}) ->
 %% ===================================================================
 %% Error Codes
 %% ===================================================================
-
-%% @doc
--spec api_error(nkservice:lang(), nkservice:error()) ->
-    atom() |
-    tuple() |
-    list() |
-    {atom(), string()} |
-    {Fmt::string(), Vals::string()} |
-    {atom(), Fmt::string(), Vals::string()}.
-
-api_error(SrvId, Error) ->
-    SrvId:api_error(Error).
-
-
-%% @doc
--spec api_error(nkservice:error()) ->
-    atom() |
-    tuple() |
-    list() |
-    {atom(), string()} |
-    {Fmt::string(), Vals::string()} |
-    {atom(), Fmt::string(), Vals::string()}.
-
-api_error(already_authenticated)	-> "Already authenticated";
-api_error(already_started)	        -> "Already started";
-api_error(already_uploaded)   		-> "Already uploaded";
-api_error(api_delete) 				-> "API delete received";
-api_error(api_stop) 				-> "API stop received";
-api_error(data_not_available)   	-> "Data is not available";
-api_error(destionation_not_found)   -> "Destination not found";
-api_error(duplicated_session_id)	-> "Duplicated session";
-api_error(file_read_error)   		-> "File read error";
-api_error(internal_error)			-> "Internal error";
-api_error({internal_error, Ref})	-> {"Internal error: ~s", [Ref]};
-api_error({invalid_action, Txt})    -> {"Invalid action '~s'", [Txt]};
-api_error({invalid_state, St}) 	    -> {"Invalid state: ~s", [St]};
-api_error({invalid_value, V}) 		-> {"Invalid value: '~s'", [V]};
-api_error(invalid_json) 			-> "Invalid JSON";
-api_error(invalid_operation) 		-> "Invalid operation";
-api_error(invalid_parameters) 		-> "Invalid parameters";
-api_error(invalid_password) 		-> "Invalid password";
-api_error(invalid_reply) 			-> "Invalid reply";
-api_error(invalid_role)			    -> "Invalid role";
-api_error(invalid_session_id)		-> "Invalid session";
-api_error(invalid_state) 			-> "Invalid state";
-api_error(invalid_uri) 			    -> "Invalid Uri";
-api_error(invalid_object_id) 		-> "Invalid ObjectId";
-api_error({missing_field, Txt})	    -> {"Missing field: '~s'", [Txt]};
-api_error(missing_id)				-> "Missing Id";
-api_error(no_usages)           		-> "No remaining usages";
-api_error(normal)           		-> "Normal termination";
-api_error(normal_termination) 		-> "Normal termination";
-api_error(not_authenticated)		-> "Not authenticated";
-api_error(not_found) 				-> "Not found";
-api_error(not_started) 				-> "Not yet started";
-api_error(not_implemented) 		    -> "Not implemented";
-api_error(process_down)  			-> "Process failed";
-api_error(process_not_found) 		-> "Process not found";
-api_error(registered_down) 	        -> "Registered process stopped";
-api_error(service_not_found) 		-> "Service not found";
-api_error(session_not_found) 		-> "Session not found";
-api_error(session_stop) 			-> "Session stop";
-api_error(session_timeout) 		    -> "Session timeout";
-api_error({syntax_error, Txt})		-> {"Syntax error: '~s'", [Txt]};
-api_error(timeout) 				    -> "Timeout";
-api_error(unauthorized) 			-> "Unauthorized";
-api_error({unknown_command, Txt})	-> {"Unknown command '~s'", [Txt]};
-api_error(unknown_peer) 			-> "Unknown peer";
-api_error(unknown_op)   			-> "Unknown operation";
-api_error(user_not_found)			-> "User not found";
-api_error({user_not_found, User})	-> {"User not found: '~s'", [User]};
-api_error(user_stop) 				-> "User stop";
-api_error(_)   		                -> continue.
-
 
 %% ===================================================================
 %% API Server Callbacks
