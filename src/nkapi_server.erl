@@ -427,7 +427,7 @@ conn_parse({text, Text}, NkPort, State) ->
             case extract_op(TId, State) of
                 {Trans, State2} ->
                     case Trans of
-                        #trans{op=#{cmd:=ping}} -> ok;
+                        #trans{op=#{cmd:=<<"ping">>}} -> ok;
                         _ -> ?MSG("received ~s", [Msg], State)
                     end,
                     Data = maps:get(<<"data">>, Msg, #{}),
@@ -444,7 +444,7 @@ conn_parse({text, Text}, NkPort, State) ->
                 {Trans, State2} ->
                     {ok, extend_op(TId, Trans, State2)};
                 not_found ->
-                    ?LLOG(info, "received client ack for unknown req: ~p", 
+                    ?LLOG(info, "received client ack for unknown req: ~p ",
                           [Msg], State),
                     {ok, State}
             end;
@@ -1022,7 +1022,7 @@ links_down(Mon, #state{links=Links}=State) ->
 
 
 %% @private
-print(_Txt, [#{cmd:=ping}], _State) ->
+print(_Txt, [#{cmd:=<<"ping">>}], _State) ->
     ok;
 print(Txt, [#{}=Map], State) ->
     print(Txt, [nklib_json:encode_pretty(Map)], State);
