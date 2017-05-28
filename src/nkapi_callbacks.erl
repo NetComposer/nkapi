@@ -57,9 +57,7 @@ plugin_deps() ->
 plugin_syntax() ->
     nkpacket_util:get_plugin_net_syntax(#{
         api_server => fun nkapi_util:parse_api_server/3,
-        api_server_timeout => {integer, 5, none},
-        web_server => fun nkapi_util:parse_web_server/3,
-        web_server_path => binary
+        api_server_timeout => {integer, 5, none}
     }).
 
 
@@ -69,12 +67,10 @@ plugin_syntax() ->
 	[{nkpacket:user_connection(), nkpacket:listener_opts()}].
 
 plugin_listen(Config, #{id:=SrvId}) ->
-    {multi, WebSrv} = maps:get(web_server, Config, {multi, []}),
-    WebSrvs = nkapi_util:get_web_servers(SrvId, WebSrv, Config),
     {multi, ApiSrv} = maps:get(api_server, Config, {multi, []}),
     ApiSrvs1 = nkapi_util:get_api_webs(SrvId, ApiSrv, Config),
     ApiSrvs2 = nkapi_util:get_api_sockets(SrvId, ApiSrv, Config),
-    WebSrvs ++ ApiSrvs1 ++ ApiSrvs2.
+    ApiSrvs1 ++ ApiSrvs2.
 
 
 

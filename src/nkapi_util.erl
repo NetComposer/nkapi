@@ -22,8 +22,8 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 -export([http/3, http_upload/7, http_download/6]).
--export([get_web_servers/3, get_api_webs/3, get_api_sockets/3]).
--export([parse_api_server/3, parse_web_server/3]).
+-export([get_api_webs/3, get_api_sockets/3]).
+-export([parse_api_server/3]).
 
 -include_lib("nkpacket/include/nkpacket.hrl").
 -include_lib("nklib/include/nklib.hrl").
@@ -53,7 +53,7 @@ http(Method, Url, Opts) ->
         #{body:=Body} ->
             {
                 Headers1,
-                to_bin(Body)                
+                to_bin(Body)
             };
         #{form:=Form} ->
             {Headers1, {form, Form}};
@@ -122,22 +122,6 @@ http_download(Url, User, Pass, Class, ObjId, Name) ->
 
 
 
-
-%% @private
-get_web_servers(SrvId, List, Config) ->
-    WebPath = case Config of
-        #{web_server_path:=UserPath} -> 
-            UserPath;
-        _ ->
-            Priv = list_to_binary(code:priv_dir(nkapi)),
-            <<Priv/binary, "/www">>
-    end,
-    NetOpts = nkpacket_util:get_plugin_net_opts(Config),
-    WebOpts2 = NetOpts#{
-        class => {nkapi_web_server, SrvId},
-        http_proto => {static, #{path=>WebPath, index_file=><<"index.html">>}}
-    },
-    [{Conns, maps:merge(ConnOpts, WebOpts2)} || {Conns, ConnOpts} <- List].
 
 
 
@@ -237,17 +221,6 @@ parse_api_server(api_server, Url, _Ctx) ->
             end
     end.
 
-
-%% @private
-parse_web_server(_Key, {multi, Multi}, _Ctx) ->
-    {ok, {multi, Multi}};
-
-parse_web_server(web_server, Url, _Ctx) ->
-    Opts = #{valid_schemes=>[http, https], resolve_type=>listen},
-    case nkpacket:multi_resolve(Url, Opts) of
-        {ok, List} -> {ok, {multi, List}};
-        _ -> error
-    end.
 
 
 %% ===================================================================
