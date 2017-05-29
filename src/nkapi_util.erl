@@ -178,7 +178,7 @@ get_api_sockets(SrvId, [{List, Opts}|Rest], Config, Acc) ->
         {nkapi_server, Proto, Ip, Port} <- List, 
         Proto==ws orelse Proto==wss orelse Proto==tcp orelse Proto==tls
     ],
-    Timeout = maps:get(api_server_tiemout, Config, 180),
+    Timeout = maps:get(api_server_timeout, Config, 180),
     NetOpts = nkpacket_util:get_plugin_net_opts(Config),
     Opts2 = NetOpts#{
         path => maps:get(path, Opts, <<"/">>),
@@ -200,8 +200,8 @@ to_bin(Term) -> nklib_util:to_binary(Term).
 %% ===================================================================
 
 %% @private
-parse_api_server(api_server, {multi, Multi}, _Ctx) ->
-    {ok, {multi, Multi}};
+parse_api_server(api_server, {nkapi_parsed, Multi}, _Ctx) ->
+    {ok, {nkapi_parsed, Multi}};
 
 parse_api_server(api_server, Url, _Ctx) ->
     case nklib_parse:uris(Url) of
@@ -214,7 +214,7 @@ parse_api_server(api_server, Url, _Ctx) ->
                 List2 ->
                     case nkpacket:multi_resolve(List2, #{resolve_type=>listen}) of
                         {ok, List3} ->
-                            {ok, {multi, List3}};
+                            {ok, {nkapi_parsed, List3}};
                         _ ->
                             error
                     end

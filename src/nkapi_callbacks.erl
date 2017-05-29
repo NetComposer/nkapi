@@ -67,7 +67,7 @@ plugin_syntax() ->
 	[{nkpacket:user_connection(), nkpacket:listener_opts()}].
 
 plugin_listen(Config, #{id:=SrvId}) ->
-    {multi, ApiSrv} = maps:get(api_server, Config, {multi, []}),
+    {nkapi_parsed, ApiSrv} = maps:get(api_server, Config, {nkapi_parsed, []}),
     ApiSrvs1 = nkapi_util:get_api_webs(SrvId, ApiSrv, Config),
     ApiSrvs2 = nkapi_util:get_api_sockets(SrvId, ApiSrv, Config),
     ApiSrvs1 ++ ApiSrvs2.
