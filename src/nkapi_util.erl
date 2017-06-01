@@ -123,8 +123,6 @@ http_download(Url, User, Pass, Class, ObjId, Name) ->
 
 
 
-
-
 %% @private
 get_api_webs(SrvId, ApiSrv, Config) ->
     get_api_webs(SrvId, ApiSrv, Config, []).
@@ -143,7 +141,7 @@ get_api_webs(SrvId, [{List, Opts}|Rest], Config, Acc) ->
     ],
     Acc2 = case List2 of
         [] ->
-            [];
+            Acc;
         _ ->
             Path1 = nklib_util:to_list(maps:get(path, Opts, <<>>)),
             Path2 = case lists:reverse(Path1) of
@@ -153,9 +151,17 @@ get_api_webs(SrvId, [{List, Opts}|Rest], Config, Acc) ->
             CowPath = Path2 ++ "/[...]",
             Routes = [{'_', [{CowPath, nkapi_server_http, [{srv_id, SrvId}]}]}],
             NetOpts = nkpacket_util:get_plugin_net_opts(Config),
+            PacketDebug = case Config of
+                #{debug:=DebugList} when is_list(DebugList) ->
+                    lists:member(nkpacket, DebugList);
+                _ ->
+                    false
+            end,
             Opts2 = NetOpts#{
                 class => {nkapi_server, SrvId},
-                http_proto => {dispatch, #{routes => Routes}}
+                http_proto => {dispatch, #{routes => Routes}},
+                path => nklib_util:to_binary(Path1),
+                debug => PacketDebug
             },
             [{List2, Opts2}|Acc]
     end,
@@ -180,12 +186,18 @@ get_api_sockets(SrvId, [{List, Opts}|Rest], Config, Acc) ->
     ],
     Timeout = maps:get(api_server_timeout, Config, 180),
     NetOpts = nkpacket_util:get_plugin_net_opts(Config),
+    PacketDebug = case Config of
+        #{debug:=DebugList} when is_list(DebugList) ->
+            lists:member(nkpacket, DebugList);
+        _ ->
+            false
+    end,
     Opts2 = NetOpts#{
         path => maps:get(path, Opts, <<"/">>),
         class => {nkapi_server, SrvId},
         get_headers => [<<"user-agent">>],
         idle_timeout => 1000 * Timeout,
-        debug => false
+        debug => PacketDebug
     },
     get_api_sockets(SrvId, Rest, Config, [{List2, maps:merge(Opts, Opts2)}|Acc]).
 

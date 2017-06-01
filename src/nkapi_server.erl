@@ -23,12 +23,11 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 -export([cmd/3, cmd_async/3, event/2]).
--export([reply/3, reply_login/5, reply_ack/2, get_tid/1]).
+-export([reply/3, get_tid/1]).
 -export([stop/1, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
 -export([subscribe/2, unsubscribe/2, unsubscribe_fun/2]).
 -export([find_user/1, find_session/1, get_subscriptions/1]).
--export([do_register_http/1]).
 -export([transports/1, default_port/1]).
 -export([conn_init/1, conn_encode/2, conn_parse/3, conn_handle_call/4, 
          conn_handle_cast/3, conn_handle_info/3, conn_stop/3]).
@@ -124,48 +123,19 @@ event(Id, Data) ->
 -spec reply(id(), tid()|#nkreq{}, {ok, map()} | {error, term()}) ->
     ok.
 
-reply(Id, #nkreq{}=Req, Reply) ->
-    reply(Id, get_tid(Req), Reply);
+reply(Id, #nkreq{}=Req, Type) ->
+    reply(Id, get_tid(Req), Type);
 
-reply(Id, TId, Reply) ->
-    Msg = case Reply of
-        {ok, Ok} -> {nkapi_reply_ok, TId, Ok};
-        {error, Error} ->  {nkapi_reply_error, TId, Error}
-    end,
-    case find(Id) of
-        {ok, Pid} ->
-            gen_server:cast(Pid, Msg);
-        not_found ->
-            case find_session_http(Id) of
-                {ok, Pid} ->
-                    Pid ! Msg;
-                _ ->
-                    ok
-            end
-    end.
+reply(Id, TId, {ok, Reply}) ->
+    do_cast(Id, {nkapi_reply_ok, TId, Reply});
 
+reply(Id, TId, {error, Error}) ->
+    do_cast(Id, {nkapi_reply_error, TId, Error});
 
-%% @doc Sends an "login ok" reply to a command (when you reply 'ack' in callbacks)
--spec reply_login(id(), tid()|#nkreq{}, map(), binary(), map()) ->
-    ok.
+reply(Id, TId, {login, Reply, User, UserMeta}) ->
+    do_cast(Id, {nkapi_reply_login, TId, Reply, User, UserMeta});
 
-reply_login(Id, #nkreq{}=Req, Reply, User, UserMeta) ->
-    reply_login(Id, get_tid(Req), Reply, User, UserMeta);
-
-reply_login(Id, TId, Reply, User, MetaData) ->
-    do_cast(Id, {nkapi_reply_login, TId, Reply, User, MetaData}).
-
-
-%% @doc Sends another ACK to a command (when you reply 'ack' in callbacks)
-%% to extend timeout
--spec reply_ack(id(), tid()|#nkreq{}) ->
-    ok.
-
-%% @doc Send to extend the timeout for the transaction 
-reply_ack(Id, #nkreq{}=Req) ->
-    reply_ack(Id, get_tid(Req));
-
-reply_ack(Id, TId) ->
+reply(Id, TId, ack) ->
     do_cast(Id, {nkapi_reply_ack, TId}).
 
 
@@ -306,22 +276,6 @@ find_session(SessId) ->
         [{User, Pid}] -> {ok, User, Pid};
         [] -> not_found
     end.
-
-
-%% @private
--spec find_session_http(binary()) ->
-    {ok, pid()} | not_found.
-
-find_session_http(SessId) ->
-    case nklib_proc:values({?MODULE, http, SessId}) of
-        [{_, Pid}] -> {ok, Pid};
-        [] -> not_found
-    end.
-
-
-%% @private
-do_register_http(SessId) ->
-    true = nklib_proc:reg({?MODULE, http, SessId}).
 
 
 
@@ -501,7 +455,7 @@ conn_handle_cast({nkapi_send_event, Event}, NkPort, State) ->
 conn_handle_cast({nkapi_reply_ok, TId, Data}, NkPort, State) ->
     case extract_op(TId, State) of
         {#trans{op=ack}, State2} ->
-            send_reply_ok(Data, TId, NkPort, State2);
+            send_reply_ok(Data, TId, [], NkPort, State2);
         not_found ->
             ?LLOG(notice, "received user reply_ok for unknown req: ~p ~p", 
                   [TId, State#state.trans], State), 
@@ -514,7 +468,7 @@ conn_handle_cast({nkapi_reply_login, TId, Reply, User, Meta}, NkPort, State) ->
             case State of
                 #state{user_id = <<>>} ->
                     State2 = State#state{user_id=User, user_meta=Meta},
-                    process_login(Reply, TId, NkPort, State2);
+                    process_login(Reply, TId, [], NkPort, State2);
                 _ ->
                     send_reply_error(already_authenticated, TId, NkPort, State2)
             end;
@@ -538,7 +492,7 @@ conn_handle_cast({nkapi_reply_ack, TId}, NkPort, State) ->
     case extract_op(TId, State) of
         {#trans{op=ack}, State2} ->
             State3 = insert_ack(TId, State2),
-            send_ack(TId, NkPort, State3);
+            send_ack(TId, [], NkPort, State3);
         not_found ->
             ?LLOG(notice, "received user reply_ack for unknown req", [], State), 
             {ok, State}
@@ -687,20 +641,17 @@ process_client_req(Cmd, Data, TId, NkPort, #state{user_state=UserState}=State) -
     Req = make_req(Cmd, Data, TId, State),
     case nkservice_api:api(Req, UserState) of
         {ok, Reply, Unknown, UserState2} ->
-            Reply2 = set_unknown_fields(Reply, Unknown, Req),
             State2 = State#state{user_state=UserState2},
-            send_reply_ok(Reply2, TId, NkPort, State2);
+            send_reply_ok(Reply, TId, Unknown, NkPort, State2);
         {ack, Unknown, UserState2} ->
-            _ = set_unknown_fields(none, Unknown, Req),
             State2 = State#state{user_state=UserState2},
             State3 = insert_ack(TId, State2),
-            send_ack(TId, NkPort, State3);
+            send_ack(TId, Unknown, NkPort, State3);
         {login, Reply, UserId, Meta, Unknown, UserState2} ->
             case State of
                 #state{user_id = <<>>} ->
                     State2 = State#state{user_id=UserId, user_meta=Meta, user_state=UserState2},
-                    Reply2 = set_unknown_fields(Reply, Unknown, Req),
-                    process_login(Reply2, TId, NkPort, State2);
+                    process_login(Reply, TId, Unknown, NkPort, State2);
                 _ ->
                     send_reply_error(already_authenticated, TId, NkPort, State)
             end;
@@ -725,19 +676,6 @@ process_client_event(Data, #state{user_state=UserState}=State) ->
 process_client_resp(Result, Data, #trans{from=From}, _NkPort, State) ->
     nklib_util:reply(From, {ok, Result, Data}),
     {ok, State}.
-
-
-%% @private
-set_unknown_fields(Reply, [], _Req) ->
-    Reply;
-
-set_unknown_fields(Reply, Fields, _Req) when is_map(Reply) ->
-    BaseUnknowns = maps:get(unknown_fields, Reply, []),
-    Reply#{unknown_fields => lists:usort(BaseUnknowns++Fields)};
-
-set_unknown_fields(_Reply, Fields, #nkreq{cmd=Cmd}=Req) ->
-    Body = #{cmd=>Cmd, fields=>Fields},
-    send_api_event(<<"unrecognized_fields">>, Body, Req).
 
 
 
@@ -781,7 +719,7 @@ make_req(Cmd, Data, TId, State) ->
 
 
 %% @private
-process_login(Reply, TId, NkPort, State) ->
+process_login(Reply, TId, Unknown, NkPort, State) ->
     #state{srv_id=SrvId, session_id=SessId, user_id=UserId, user_meta=Meta} = State,
     nklib_proc:put(?MODULE, {UserId, SessId}),
     nklib_proc:put({?MODULE, SrvId}, {UserId, SessId}),
@@ -800,7 +738,7 @@ process_login(Reply, TId, NkPort, State) ->
     },
     subscribe(self(), Event2),
     start_ping(self(), nkapi_app:get(api_ping_timeout)),
-    send_reply_ok(Reply, TId, NkPort, State).
+    send_reply_ok(Reply, TId, Unknown, NkPort, State).
 
 
 %% @private
@@ -912,17 +850,17 @@ send_request(Cmd, Data, From, NkPort, #state{tid=TId}=State) ->
     send(Msg2, NkPort, State2#state{tid=TId+1}).
 
 
-%% @private
-send_api_event(Type, Body, #nkreq{srv_id=SrvId, session_id=SessId}) ->
-    Event = #nkevent{
-        srv_id = SrvId,
-        class = <<"api">>,
-        subclass = <<"session">>,
-        type = Type,
-        obj_id = SessId,
-        body = Body
-    },
-    event(self(), Event).
+%%%% @private
+%%send_api_event(Type, Body, #nkreq{srv_id=SrvId, session_id=SessId}) ->
+%%    Event = #nkevent{
+%%        srv_id = SrvId,
+%%        class = <<"api">>,
+%%        subclass = <<"session">>,
+%%        type = Type,
+%%        obj_id = SessId,
+%%        body = Body
+%%    },
+%%    event(self(), Event).
 
 
 %% @private
@@ -936,7 +874,7 @@ send_event(Event, NkPort, State) ->
 
 
 %% @private
-send_reply_ok(Data, TId, NkPort, State) ->
+send_reply_ok(Data, TId, Unknown, NkPort, State) ->
     Msg1 = #{
         result => ok,
         tid => TId
@@ -946,7 +884,11 @@ send_reply_ok(Data, TId, NkPort, State) ->
         #{} -> Msg1#{data=>Data};
         List when is_list(List) -> Msg1#{data=>Data}
     end,
-    send(Msg2, NkPort, State).
+    Msg3 = case Unknown of
+        [] -> Msg2;
+        _ -> Msg2#{unknown_fields=>Unknown}
+    end,
+    send(Msg3, NkPort, State).
 
 
 %% @private
@@ -964,9 +906,13 @@ send_reply_error(Error, TId, NkPort, #state{srv_id=SrvId}=State) ->
 
 
 %% @private
-send_ack(TId, NkPort, State) ->
-    Msg = #{ack => TId},
-    send(Msg, NkPort, State).
+send_ack(TId, Unknown, NkPort, State) ->
+    Msg1 = #{ack => TId},
+    Msg2 = case Unknown of
+        [] -> Msg1;
+        _ -> Msg1#{unknown_fields=>Unknown}
+    end,
+    send(Msg2, NkPort, State).
 
 
 %% @private

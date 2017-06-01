@@ -23,10 +23,10 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 -export([plugin_deps/0, plugin_syntax/0, plugin_listen/2]).
 -export([api_server_init/2, api_server_terminate/2,
-         api_server_http_auth/2, api_server_http/4,
 		 api_server_reg_down/3,
 		 api_server_handle_call/3, api_server_handle_cast/2, 
 		 api_server_handle_info/2, api_server_code_change/3]).
+-export([api_server_http_auth/2]).
 -export([service_api_syntax/2,service_api_cmd/2]).
 -export_type([continue/0]).
 
@@ -51,6 +51,7 @@ plugin_deps() ->
 %% @doc This function, if implemented, can offer a nklib_config:syntax()
 %% that will be checked against service configuration. Entries passing will be
 %% updated on the configuration with their parsed values
+%% To debug, set api_server or {api_server, [nkpacket]} in the 'debug' config option
 -spec plugin_syntax() ->
 	nklib_config:syntax().
 
@@ -66,10 +67,11 @@ plugin_syntax() ->
 -spec plugin_listen(config(), nkservice:service()) ->
 	[{nkpacket:user_connection(), nkpacket:listener_opts()}].
 
-plugin_listen(Config, #{id:=SrvId}) ->
+plugin_listen(Config, #{id:=SrvId}=Srv) ->
     {nkapi_parsed, ApiSrv} = maps:get(api_server, Config, {nkapi_parsed, []}),
-    ApiSrvs1 = nkapi_util:get_api_webs(SrvId, ApiSrv, Config),
-    ApiSrvs2 = nkapi_util:get_api_sockets(SrvId, ApiSrv, Config),
+    Debug = nklib_util:get_value(nkapi_server, maps:get(debug, Srv, [])),
+    ApiSrvs1 = nkapi_util:get_api_webs(SrvId, ApiSrv, Config#{debug=>Debug}),
+    ApiSrvs2 = nkapi_util:get_api_sockets(SrvId, ApiSrv, Config#{debug=>Debug}),
     ApiSrvs1 ++ ApiSrvs2.
 
 
@@ -84,11 +86,6 @@ plugin_listen(Config, #{id:=SrvId}) ->
 %% ===================================================================
 
 -type state() :: nkapi_server:user_state().
--type http_method() :: nkapi_server_http:method().
--type http_path() :: nkapi_server_http:path().
--type http_req() :: nkapi_server_http:req().
--type http_reply() :: nkapi_server_http:reply().
-
 
 
 %% @doc Called when a new connection starts
@@ -97,53 +94,6 @@ plugin_listen(Config, #{id:=SrvId}) ->
 
 api_server_init(_NkPort, State) ->
 	{ok, State}.
-
-
-%%%% @doc Used when the standard login apply
-%%%% Called from nkapi_api or nkapi_server_http
-%%-spec api_server_login(map(), state()) ->
-%%	{true, User::binary(), Meta::map(), state()} |
-%%	{false, error_code(), state()} | continue.
-%%
-%%api_server_login(_Data, State) ->
-%%	{false, unauthorized, State}.
-
-
-%% @doc called when a new http request has been received
--spec api_server_http_auth(http_req(), state()) ->
-    {true, User::binary(), Meta::map(), state()} | {false, state()}.
-
-api_server_http_auth(Req, State) ->
-    case nkapi_server_http:get_basic_auth(Req) of
-        {basic, _User, _Pass} ->
-            {false, State};
-        undefined ->
-            {false, State}
-    end.
-
-
-%% @doc called when a new http request has been received
--spec api_server_http(http_method(), http_path(), http_req(), state()) ->
-    http_reply().
-
-api_server_http(post, [<<"api">>], _Req, State) ->
-    {rpc, State};
-
-api_server_http(_Method, _Path, _Req, State) ->
-    lager:info("NkAPI HTTP path not found: ~p", [_Path]),
-    {http, 404, [], <<"Not Found">>, State}.
-
-
-
-%%%% @doc Called when the API server receives an event notification from
-%%%% nkevent (because we are subscribed to it).
-%%%% We can send it to the remote side or ignore it.
-%%-spec api_server_forward_event(nkevent:event(), state()) ->
-%%	{ok, nkevent:event(), continue()} |
-%%	{ignore, state()}.
-%%
-%%api_server_forward_event(Event, State) ->
-%%	{ok, Event, State}.
 
 
 %% @doc Called when the service process receives a registered process down
@@ -195,6 +145,17 @@ api_server_code_change(OldVsn, State, Extra) ->
 
 api_server_terminate(_Reason, State) ->
 	{ok, State}.
+
+
+%% @doc called when a new http request has been received to select te authenticated user
+-spec api_server_http_auth(#nkreq{}, nkapi_server_http:http_req()) ->
+    {true, User::binary(), Meta::map()} | false.
+
+api_server_http_auth(_Req, _HttpReq) ->
+    false.
+
+
+
 
 
 %% ===================================================================

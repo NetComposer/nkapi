@@ -22,10 +22,9 @@
 -module(nkapi_sample).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
--define(SRV, test).
-%%-define(WS, "ws://127.0.0.1:9202/apiws").
--define(WS, "wss://127.0.0.1:9010/ws").
--define(HTTP, "https://127.0.0.1:9010/rpc/api").
+-define(SRV, api_test).
+-define(WS, "wss://127.0.0.1:9010/api/ws").
+-define(HTTP, "https://127.0.0.1:9010/api").
 
 -compile(export_all).
 
@@ -40,21 +39,21 @@
 start() ->
     Spec = #{
         callback => ?MODULE,
-        api_server => "wss:all:9010, ws:all:9011/ws, https://all:9010/rpc",
+        api_server => "wss:all:9010/api/ws, https://all:9010/api",
         api_server_timeout => 300,
-        debug => [nkapi_client, nkapi_server, nkevent],
+        %debug => [nkapi_client, {nkapi_server, [nkpacket]}, nkevent],
         %plugins => [nkapi_log_gelf],
-        api_gelf_server => "c2.netc.io",
+        %api_gelf_server => "c2.netc.io",
         % To test nkpacket config:
         tls_password => <<"1234">>,
         packet_no_dns_cache => false
     },
-    nkservice:start(test, Spec).
+    nkservice:start(?SRV, Spec).
 
 
 %% @doc Stops the service
 stop() ->
-    nkservice:stop(test).
+    nkservice:stop(?SRV).
 
 
 login(User) ->
