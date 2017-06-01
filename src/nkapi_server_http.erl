@@ -151,12 +151,16 @@ init(HttpReq, [{srv_id, SrvId}]) ->
             cmd = Cmd,
             data = Data
         },
-        Req2 =  process_auth(Req, HttpReq),
-        case Cmd of
-            <<"event">> ->
-                process_event(Req2, HttpReq);
-            _ ->
-                process_req(Req2, HttpReq)
+        case process_auth(Req, HttpReq) of
+            {ok, Req2, UserState} ->
+                case Cmd of
+                    <<"event">> ->
+                        process_event(Req2, HttpReq, UserState);
+                    _ ->
+                        process_req(Req2, HttpReq, UserState)
+                end;
+            {error, Error} ->
+                send_msg_error(Error, Req, HttpReq)
         end
     catch throw:{Code, Hds, Reply} ->
         send_http_reply(Code, Hds, Reply, HttpReq)
@@ -174,17 +178,19 @@ terminate(_Reason, _Req, _Opts) ->
 
 %% @private
 process_auth(#nkreq{srv_id=SrvId}=Req, HttpReq) ->
-    case SrvId:nkapi_server_http_auth(Req, HttpReq) of
-        {true, UserId, Meta} ->
-            Req#nkreq{user_id=UserId, user_meta=Meta};
-        _ ->
-            throw({403, [], <<"User forbidden">>})
+    case SrvId:api_server_http_auth(Req, HttpReq) of
+        {true, UserId, Meta, State} ->
+            {ok, Req#nkreq{user_id=UserId, user_meta=Meta}, State};
+        false ->
+            throw({403, [], <<"User forbidden">>});
+        {error, Error} ->
+            {error, Error}
     end.
 
 
 %% @private
-process_req(Req, HttpReq) ->
-    case nkservice_api:api(Req, #{}) of
+process_req(Req, HttpReq, UserState) ->
+    case nkservice_api:api(Req, UserState) of
         {ok, Reply, Unknown, _UserState2} ->
             send_msg_ok(Reply, Unknown, HttpReq);
         {ack, Unknown, _UserState2} ->
@@ -196,8 +202,8 @@ process_req(Req, HttpReq) ->
     end.
 
 %% @private
-process_event(Req, HttpReq) ->
-    case nkservice_api:event(Req, #{}) of
+process_event(Req, HttpReq, UserState) ->
+    case nkservice_api:event(Req, UserState) of
         {ok, _UserState2} ->
             send_msg_ok(#{}, [], HttpReq);
         {error, Error, _UserState2} ->
