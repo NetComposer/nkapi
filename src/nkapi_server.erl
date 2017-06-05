@@ -24,7 +24,7 @@
 
 -export([cmd/3, cmd_async/3, event/2]).
 -export([reply/3, get_tid/1]).
--export([stop/1, stop_all/0, start_ping/2, stop_ping/1]).
+-export([stop/1, stop/2, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
 -export([subscribe/2, unsubscribe/2, unsubscribe_fun/2]).
 -export([find_user/1, find_session/1, get_subscriptions/1]).
@@ -166,7 +166,12 @@ stop_ping(Id) ->
 
 %% @doc Stops the server
 stop(Id) ->
-    do_cast(Id, nkapi_stop).
+    stop(Id, user_stop).
+
+
+%% @doc Stops the server
+stop(Id, Reason) ->
+    do_cast(Id, {nkapi_stop, Reason}).
 
 
 %% @doc Stops all clients
@@ -498,7 +503,13 @@ conn_handle_cast({nkapi_reply_ack, TId}, NkPort, State) ->
             {ok, State}
     end;
 
-conn_handle_cast(nkapi_stop, _NkPort, State) ->
+conn_handle_cast({nkapi_stop, Reason}, _NkPort, State) ->
+    case Reason of
+        user_stop ->
+            ok;
+        _ ->
+            ?LLOG(notice, "connection stopped: ~p", [Reason], State)
+    end,
     {stop, normal, State};
 
 conn_handle_cast({nkapi_start_ping, Time}, _NkPort, #state{ping=Ping}=State) ->
