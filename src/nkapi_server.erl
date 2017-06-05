@@ -616,7 +616,8 @@ conn_handle_info({'DOWN', Ref, process, _Pid, Reason}=Info, _NkPort, State) ->
                         {ok, State3} ->
                             {ok, State3};
                         {stop, Reason2, State3} ->
-                            {stop, Reason2, State3}
+                            stop(self(), Reason2),
+                            {ok, State3}
                     end;
                 not_found ->
                     handle(api_server_handle_info, [Info], State)
