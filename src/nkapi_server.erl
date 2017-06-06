@@ -504,12 +504,7 @@ conn_handle_cast({nkapi_reply_ack, TId}, NkPort, State) ->
     end;
 
 conn_handle_cast({nkapi_stop, Reason}, _NkPort, State) ->
-    case Reason of
-        user_stop ->
-            ok;
-        _ ->
-            ?LLOG(notice, "connection stopped: ~p", [Reason], State)
-    end,
+    ?LLOG(info, "user stop: ~p", [Reason], State),
     {stop, normal, State};
 
 conn_handle_cast({nkapi_start_ping, Time}, _NkPort, #state{ping=Ping}=State) ->
@@ -616,6 +611,7 @@ conn_handle_info({'DOWN', Ref, process, _Pid, Reason}=Info, _NkPort, State) ->
                         {ok, State3} ->
                             {ok, State3};
                         {stop, Reason2, State3} ->
+                            ?LLOG(notice, "linked process stop: ~p", [Reason2], State),
                             stop(self(), Reason2),
                             {ok, State3}
                     end;
@@ -639,7 +635,7 @@ conn_stop(Reason, _NkPort, #state{trans=Trans}=State) ->
     lists:foreach(
         fun({_, #trans{from=From}}) -> nklib_util:reply(From, {error, stopped}) end,
         maps:to_list(Trans)),
-    ?DEBUG("server stop (~p): ~p", [Reason, Trans], State),
+    ?DEBUG("server conn_stop (~p): ~p", [Reason, Trans], State),
     catch handle(api_server_terminate, [Reason], State).
 
 
