@@ -431,7 +431,7 @@ do_call(Id, Msg) ->
         {ok, Pid} ->
             nklib_util:call(Pid, Msg, 1000*?CALL_TIMEOUT);
         not_found ->
-            {error, not_found}
+            {error, {client_id_not_found, Id}}
     end.
 
 
