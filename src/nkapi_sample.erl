@@ -23,8 +23,8 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 -define(SRV, api_test).
--define(WS, "wss://127.0.0.1:9010/api/ws").
--define(HTTP, "https://127.0.0.1:9010/api").
+-define(WS, "wss://127.0.0.1:9010/_api/ws").
+-define(HTTP, "https://127.0.0.1:9010/_api").
 
 -compile(export_all).
 
@@ -39,7 +39,7 @@
 start() ->
     Spec = #{
         callback => ?MODULE,
-        api_server => "wss:all:9010/api/ws, https://all:9010/api",
+        api_server => "wss:all:9010/_api/ws, https://all:9010/_api",
         api_server_timeout => 300,
         %debug => [nkapi_client, {nkapi_server, [nkpacket]}, nkevent],
         %plugins => [nkapi_log_gelf],
