@@ -217,6 +217,8 @@ process_req(Req, HttpReq, UserState) ->
     case nkservice_api:api(Req, UserState) of
         {ok, Reply, Unknown, _UserState2} ->
             send_msg_ok(Reply, Unknown, HttpReq);
+        {ok, Reply, _UserMeta, Unknown, _UserState2} ->
+            send_msg_ok(Reply, Unknown, HttpReq);
         {ack, Unknown, _UserState2} ->
             wait_ack(Unknown, Req, HttpReq);
         {login, Reply, _UserId, _Meta, Unknown, _UserState2} ->

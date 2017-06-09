@@ -665,6 +665,9 @@ process_client_req(Cmd, Data, TId, NkPort, #state{user_state=UserState}=State) -
         {ok, Reply, Unknown, UserState2} ->
             State2 = State#state{user_state=UserState2},
             send_reply_ok(Reply, TId, Unknown, NkPort, State2);
+        {ok, Reply, UserMeta, Unknown, UserState2} ->
+            State2 = State#state{user_meta=UserMeta, user_state=UserState2},
+            send_reply_ok(Reply, TId, Unknown, NkPort, State2);
         {ack, Unknown, UserState2} ->
             State2 = State#state{user_state=UserState2},
             State3 = insert_ack(TId, State2),
