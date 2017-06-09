@@ -25,7 +25,7 @@
 %% - callback api_server_http is called to process the message
 
 -module(nkapi_server_http).
--export([reply/2, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
+-export([reply/2, reply/3, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
 -export([init/2, terminate/3]).
 
 -define(MAX_BODY, 10000000).
@@ -50,30 +50,51 @@
 %% ===================================================================
 
 -type http_req() :: term().
-
+-type tid() :: integer().
 
 %% ===================================================================
 %% Public
 %% ===================================================================
 
+
+%% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
+-spec reply(#nkreq{},
+            {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
+            {error, term()} |
+            {login, Reply::map(), User::binary(), UserMeta::map()} |
+            ack) ->
+               ok.
+
+reply(#nkreq{conn_id=Id, tid=TId}, Type) ->
+    reply(Id, TId, Type).
+
+
 %% @doc Sends a reply to a command (when you reply 'ack' in callbacks)
--spec reply(pid(), {ok, map()} | {error, term()}) ->
+-spec reply(pid(), tid(),
+            {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
+            {error, term()} |
+            {login, Reply::map(), User::binary(), UserMeta::map()} |
+            ack) ->
     ok.
 
-reply(Pid, {ok, Reply}) ->
-    Pid ! {nkapi_reply_ok, Reply},
+reply(Pid, TId, {ok, Reply}) ->
+    Pid ! {nkapi_reply_ok, TId, Reply},
     ok;
 
-reply(Pid, {error, Error}) ->
-    Pid ! {nkapi_reply_error, Error},
+reply(Pid, TId, {ok, Reply, _UserMeta}) ->
+    Pid ! {nkapi_reply_ok, TId, Reply},
     ok;
 
-reply(Pid, {login, Reply, User, UserMeta}) ->
-    Pid ! {nkapi_reply_login, Reply, User, UserMeta},
+reply(Pid, TId, {error, Error}) ->
+    Pid ! {nkapi_reply_error, TId, Error},
     ok;
 
-reply(Pid, ack) ->
-    Pid ! nkapi_reply_ack,
+reply(Pid, TId, {login, Reply, User, UserMeta}) ->
+    Pid ! {nkapi_reply_login, TId, Reply, User, UserMeta},
+    ok;
+
+reply(Pid, TId, ack) ->
+    Pid ! {nkapi_reply_ack, TId},
     ok.
 
 
@@ -142,11 +163,14 @@ init(HttpReq, [{srv_id, SrvId}]) ->
             _ -> throw({400, [], <<"Only POST is supported">>})
         end,
         {ok, Cmd, Data} = get_body(HttpReq),
+        SessionId = nklib_util:luid(),
         Req = #nkreq{
             srv_id = SrvId,
+            conn_id = self(),
             session_module = ?MODULE,
-            session_id = nklib_util:luid(),
+            session_id = SessionId,
             session_meta = #{remote => Remote},
+            tid = erlang:phash2(SessionId),
             debug = Debug,
             cmd = Cmd,
             data = Data
@@ -259,15 +283,18 @@ get_body(Req) ->
 
 
 %% @private
-wait_ack(Unknown, Req, HttpReq) ->
+wait_ack(Unknown, #nkreq{tid=TId}=Req, HttpReq) ->
     receive
-        {nkapi_reply_ok, Reply} ->
+        {nkapi_reply_ok, TId, Reply} ->
             send_msg_ok(Reply, Unknown, HttpReq);
-        {nkapi_reply_error, Error} ->
+        {nkapi_reply_error, TId, Error} ->
             send_msg_error(Error, Req, HttpReq);
-        {nkapi_reply_login, Reply, _UserId, _UserMeta} ->
+        {nkapi_reply_login, TId, Reply, _UserId, _UserMeta} ->
             send_msg_ok(Reply, Unknown, HttpReq);
-        nkapi_ack ->
+        {nkapi_ack, TId} ->
+            wait_ack(Unknown, Req, HttpReq);
+        Other ->
+            ?LLOG(warning, "unexpected msg in wait_ack: ~p", [Other], Req),
             wait_ack(Unknown, Req, HttpReq)
     after
         1000*?MAX_ACK_TIME -> 

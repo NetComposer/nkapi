@@ -23,7 +23,7 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 -export([cmd/3, cmd_async/3, event/2]).
--export([reply/3, get_tid/1]).
+-export([reply/2, reply/3]).
 -export([stop/1, stop/2, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
 -export([subscribe/2, unsubscribe/2, unsubscribe_fun/2]).
@@ -79,7 +79,8 @@
 
 
 -type session_meta() :: #{
-    tid => integer()
+    local => binary(),
+    remote => binary()
 }.
 
 -type tid() :: integer().
@@ -120,14 +121,30 @@ event(Id, Data) ->
 
 
 %% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
--spec reply(id(), tid()|#nkreq{}, {ok, map()} | {error, term()}) ->
+-spec reply(#nkreq{},
+            {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
+            {error, term()} |
+            {login, Reply::map(), User::binary(), UserMeta::map()} |
+            ack) ->
     ok.
 
-reply(Id, #nkreq{}=Req, Type) ->
-    reply(Id, get_tid(Req), Type);
+reply(#nkreq{conn_id=Id, tid=TId}, Type) ->
+    reply(Id, TId, Type).
+
+
+%% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
+-spec reply(id(), tid(),
+            {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
+            {error, term()} |
+            {login, Reply::map(), User::binary(), UserMeta::map()} |
+            ack) ->
+               ok.
 
 reply(Id, TId, {ok, Reply}) ->
     do_cast(Id, {nkapi_reply_ok, TId, Reply});
+
+reply(Id, TId, {ok, Reply, UserMeta}) ->
+    do_cast(Id, {nkapi_reply_ok, TId, Reply, UserMeta});
 
 reply(Id, TId, {error, Error}) ->
     do_cast(Id, {nkapi_reply_error, TId, Error});
@@ -137,14 +154,6 @@ reply(Id, TId, {login, Reply, User, UserMeta}) ->
 
 reply(Id, TId, ack) ->
     do_cast(Id, {nkapi_reply_ack, TId}).
-
-
-%% @doc
--spec get_tid(#nkreq{}) ->
-    tid().
-
-get_tid(#nkreq{session_meta=#{tid:=TId}}) ->
-    TId.
 
 
 %% @doc Start sending pings
@@ -458,12 +467,17 @@ conn_handle_cast({nkapi_send_event, Event}, NkPort, State) ->
     send_event(Event, NkPort, State);
 
 conn_handle_cast({nkapi_reply_ok, TId, Data}, NkPort, State) ->
-    case extract_op(TId, State) of
-        {#trans{op=ack}, State2} ->
-            send_reply_ok(Data, TId, [], NkPort, State2);
+    #state{user_meta=UserMeta} = State,
+    conn_handle_cast({nkapi_reply_ok, TId, Data, UserMeta}, NkPort, State);
+
+conn_handle_cast({nkapi_reply_ok, TId, Data, UserMeta}, NkPort, State) ->
+    State2 = State#state{user_meta=UserMeta},
+    case extract_op(TId, State2) of
+        {#trans{op=ack}, State3} ->
+            send_reply_ok(Data, TId, [], NkPort, State3);
         not_found ->
-            ?LLOG(notice, "received user reply_ok for unknown req: ~p ~p", 
-                  [TId, State#state.trans], State), 
+            ?LLOG(notice, "received user reply_ok for unknown req: ~p ~p",
+                  [TId, State#state.trans], State),
             {ok, State}
     end;
 
@@ -715,9 +729,11 @@ make_req(Cmd, Data, TId, State) ->
     } = State,
     #nkreq{
         srv_id = SrvId,
+        conn_id = self(),
         session_module = ?MODULE,
         session_id = SessId,
-        session_meta = #{tid=>TId, local=>Local, remote=>Remote},
+        session_meta = #{local=>Local, remote=>Remote},
+        tid = TId,
         cmd = Cmd,
         data = Data,
         user_id = UserId,
