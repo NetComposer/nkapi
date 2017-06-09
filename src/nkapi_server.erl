@@ -484,10 +484,10 @@ conn_handle_cast({nkapi_reply_ok, TId, Data, UserMeta}, NkPort, State) ->
 conn_handle_cast({nkapi_reply_login, TId, Reply, User, Meta}, NkPort, State) ->
     case extract_op(TId, State) of
         {#trans{op=ack}, State2} ->
-            case State of
+            case State2 of
                 #state{user_id = <<>>} ->
-                    State2 = State#state{user_id=User, user_meta=Meta},
-                    process_login(Reply, TId, [], NkPort, State2);
+                    State3 = State2#state{user_id=User, user_meta=Meta},
+                    process_login(Reply, TId, [], NkPort, State3);
                 _ ->
                     send_reply_error(already_authenticated, TId, NkPort, State2)
             end;

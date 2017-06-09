@@ -85,9 +85,8 @@ cmd(<<"event/unsubscribe">>, #nkreq{data=Data}, State) ->
     end;
 
 %% Gets [#{class=>...}]
-cmd(<<"event/get_subscriptions">>, Req, State) ->
+cmd(<<"event/get_subscriptions">>, #nkreq{tid=TId}, State) ->
     Self = self(),
-    TId = nkapi_server:get_tid(Req),
     spawn_link(
         fun() ->
             Reply = nkapi_server:get_subscriptions(Self),
@@ -165,11 +164,10 @@ cmd(<<"session/api_test">>, #nkreq{data=#{data:=Data}}, State) ->
     {ok, #{reply=>Data}, State};
 
 cmd(<<"session/api_test.async">>, #nkreq{data=#{data:=Data}}=Req, State) ->
-    Self = self(),
     spawn_link(
         fun() ->
             timer:sleep(2000),
-            nkapi_server:reply(Self, Req, {ok, #{reply=>Data}})
+            nkapi_server:reply(Req, {ok, #{reply=>Data}})
         end),
     {ack, State};
 
@@ -184,9 +182,8 @@ cmd(Cmd, Req, State) ->
 
 
 %% @private
-launch_cmd(#nkreq{data=#{cmd:=Cmd}=Data}=Req, Pid, Self) ->
+launch_cmd(#nkreq{data=#{cmd:=Cmd}=Data, tid=TId}=Req, Pid, Self) ->
     CmdData = maps:get(data, Data, #{}),
-    TId = nkapi_server:get_tid(Req),
     case nkapi_server:cmd(Pid, Cmd, CmdData) of
         {ok, <<"ok">>, ResData} ->
             nkapi_server:reply(Self, TId, {ok, ResData});
