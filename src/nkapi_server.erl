@@ -137,7 +137,7 @@ reply(#nkreq{conn_id=Id, tid=TId}, Type) ->
             {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
             {error, term()} |
             {login, Reply::map(), User::binary(), UserMeta::map()} |
-            ack) ->
+            ack | {ack, pid()}) ->
                ok.
 
 reply(Id, TId, {ok, Reply}) ->
@@ -152,11 +152,12 @@ reply(Id, TId, {error, Error}) ->
 reply(Id, TId, {login, Reply, User, UserMeta}) ->
     do_cast(Id, {nkapi_reply_login, TId, Reply, User, UserMeta});
 
-reply(Id, TId, {ack, Pid}) ->
-    do_cast(Id, {nkapi_reply_ack, Pid, TId});
-
 reply(Id, TId, ack) ->
-    reply(Id, TId, {ack, undefined}).
+    reply(Id, TId, {ack, undefined});
+
+reply(Id, TId, {ack, Pid}) ->
+    do_cast(Id, {nkapi_reply_ack, Pid, TId}).
+
 
 
 

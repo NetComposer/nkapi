@@ -62,8 +62,8 @@
             {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
             {error, term()} |
             {login, Reply::map(), User::binary(), UserMeta::map()} |
-            ack) ->
-               ok.
+            ack | {ack, pid()}) ->
+       ok.
 
 reply(#nkreq{conn_id=Id, tid=TId}, Type) ->
     reply(Id, TId, Type).
@@ -74,8 +74,8 @@ reply(#nkreq{conn_id=Id, tid=TId}, Type) ->
             {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
             {error, term()} |
             {login, Reply::map(), User::binary(), UserMeta::map()} |
-            ack) ->
-    ok.
+            ack | {ack, pid()}) ->
+       ok.
 
 reply(Pid, TId, {ok, Reply}) ->
     Pid ! {nkapi_reply_ok, TId, Reply},
@@ -94,7 +94,10 @@ reply(Pid, TId, {login, Reply, User, UserMeta}) ->
     ok;
 
 reply(Pid, TId, ack) ->
-    Pid ! {nkapi_reply_ack, TId},
+    reply(Pid, TId, {ack, undefined});
+
+reply(Pid, TId, {ack, Pid}) ->
+    Pid ! {nkapi_reply_ack, TId, Pid},
     ok.
 
 
@@ -220,7 +223,9 @@ process_req(Req, HttpReq, UserState) ->
         {ok, Reply, _UserMeta, Unknown, _UserState2} ->
             send_msg_ok(Reply, Unknown, HttpReq);
         {ack, Unknown, _UserState2} ->
-            wait_ack(Unknown, Req, HttpReq);
+            wait_ack(undefined, Unknown, Req, HttpReq);
+        {ack, Pid, Unknown, _UserState2} ->
+            wait_ack(monitor(process, Pid), Unknown, Req, HttpReq);
         {login, Reply, _UserId, _Meta, Unknown, _UserState2} ->
             send_msg_ok(Reply, Unknown, HttpReq);
         {error, Error, _UserState2} ->
@@ -285,21 +290,31 @@ get_body(Req) ->
 
 
 %% @private
-wait_ack(Unknown, #nkreq{tid=TId}=Req, HttpReq) ->
+wait_ack(Mon, Unknown, #nkreq{tid=TId}=Req, HttpReq) ->
     receive
         {nkapi_reply_ok, TId, Reply} ->
+            nklib_util:demonitor(Mon),
             send_msg_ok(Reply, Unknown, HttpReq);
         {nkapi_reply_error, TId, Error} ->
+            nklib_util:demonitor(Mon),
             send_msg_error(Error, Req, HttpReq);
         {nkapi_reply_login, TId, Reply, _UserId, _UserMeta} ->
+            nklib_util:demonitor(Mon),
             send_msg_ok(Reply, Unknown, HttpReq);
-        {nkapi_ack, TId} ->
-            wait_ack(Unknown, Req, HttpReq);
+        {nkapi_reply_ack, TId, Pid} when is_pid(Pid) ->
+            nklib_util:demonitor(Mon),
+            Mon2 = monitor(process, Pid),
+            wait_ack(Mon2, Unknown, Req, HttpReq);
+        {nkapi_reply_ack, TId, _} ->
+            wait_ack(Mon, Unknown, Req, HttpReq);
+        {'DOWN', Mon, process, _Pid, _Reason} ->
+            send_msg_error(process_down, Req, HttpReq);
         Other ->
             ?LLOG(warning, "unexpected msg in wait_ack: ~p", [Other], Req),
-            wait_ack(Unknown, Req, HttpReq)
+            wait_ack(Mon, Unknown, Req, HttpReq)
     after
-        1000*?MAX_ACK_TIME -> 
+        1000*?MAX_ACK_TIME ->
+            nklib_util:demonitor(Mon),
             send_msg_error(timeout, Req, HttpReq)
     end.
 
