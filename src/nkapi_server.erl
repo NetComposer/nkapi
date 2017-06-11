@@ -621,7 +621,7 @@ conn_handle_info({'DOWN', Ref, process, _Pid, Reason}=Info, NkPort, State) ->
     #state{regs=Regs} = State,
     case lists:keytake(Ref, #reg.mon, Regs) of
         {value, #reg{event=Event}, Regs2} ->
-            sub scribe(self(), Event),
+            subscribe(self(), Event),
             {ok, State#state{regs=Regs2}};
         false ->
             case links_down(Ref, State) of
