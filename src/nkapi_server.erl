@@ -125,7 +125,7 @@ event(Id, Data) ->
             {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
             {error, term()} |
             {login, Reply::map(), User::binary(), UserMeta::map()} |
-            ack) ->
+            ack | {ack, pid()}) ->
     ok.
 
 reply(#nkreq{conn_id=Id, tid=TId}, Type) ->
@@ -152,8 +152,12 @@ reply(Id, TId, {error, Error}) ->
 reply(Id, TId, {login, Reply, User, UserMeta}) ->
     do_cast(Id, {nkapi_reply_login, TId, Reply, User, UserMeta});
 
+reply(Id, TId, {ack, Pid}) ->
+    do_cast(Id, {nkapi_reply_ack, Pid, TId});
+
 reply(Id, TId, ack) ->
-    do_cast(Id, {nkapi_reply_ack, TId}).
+    reply(Id, TId, {ack, undefined}).
+
 
 
 %% @doc Start sending pings
@@ -300,6 +304,7 @@ find_session(SessId) ->
 -record(trans, {
     op :: term(),
     timer :: reference(),
+    mon :: reference(),
     from :: {pid(), term()} | {async, pid(), term()}
 }).
 
@@ -507,10 +512,10 @@ conn_handle_cast({nkapi_reply_error, TId, Code}, NkPort, State) ->
             {ok, State}
     end;
 
-conn_handle_cast({nkapi_reply_ack, TId}, NkPort, State) ->
+conn_handle_cast({nkapi_reply_ack, Pid, TId}, NkPort, State) ->
     case extract_op(TId, State) of
         {#trans{op=ack}, State2} ->
-            State3 = insert_ack(TId, State2),
+            State3 = insert_ack(TId, Pid, State2),
             send_ack(TId, [], NkPort, State3);
         not_found ->
             ?LLOG(notice, "received user reply_ack for unknown req", [], State), 
@@ -612,11 +617,11 @@ conn_handle_info({timeout, _, {nkapi_op_timeout, TId}}, _NkPort, State) ->
 conn_handle_info({'EXIT', _PId, normal}, _NkPort, State) ->
     {ok, State};
 
-conn_handle_info({'DOWN', Ref, process, _Pid, Reason}=Info, _NkPort, State) ->
+conn_handle_info({'DOWN', Ref, process, _Pid, Reason}=Info, NkPort, State) ->
     #state{regs=Regs} = State,
     case lists:keytake(Ref, #reg.mon, Regs) of
         {value, #reg{event=Event}, Regs2} ->
-            subscribe(self(), Event),
+            sub scribe(self(), Event),
             {ok, State#state{regs=Regs2}};
         false ->
             case links_down(Ref, State) of
@@ -630,7 +635,13 @@ conn_handle_info({'DOWN', Ref, process, _Pid, Reason}=Info, _NkPort, State) ->
                             {ok, State3}
                     end;
                 not_found ->
-                    handle(api_server_handle_info, [Info], State)
+                    case extract_op_mon(Ref, State) of
+                        {true, TId, #trans{op=Op}, State2} ->
+                            ?LLOG(notice, "operation ~p (~p) process down!", [Op, TId], State),
+                            send_reply_error(process_down, TId, NkPort, State2);
+                        false ->
+                            handle(api_server_handle_info, [Info], State)
+                    end
             end
     end;
 
@@ -670,7 +681,11 @@ process_client_req(Cmd, Data, TId, NkPort, #state{user_state=UserState}=State) -
             send_reply_ok(Reply, TId, Unknown, NkPort, State2);
         {ack, Unknown, UserState2} ->
             State2 = State#state{user_state=UserState2},
-            State3 = insert_ack(TId, State2),
+            State3 = insert_ack(TId, undefined, State2),
+            send_ack(TId, Unknown, NkPort, State3);
+        {ack, Pid, Unknown, UserState2} ->
+            State2 = State#state{user_state=UserState2},
+            State3 = insert_ack(TId, Pid, State2),
             send_ack(TId, Unknown, NkPort, State3);
         {login, Reply, UserId, Meta, Unknown, UserState2} ->
             case State of
@@ -830,9 +845,14 @@ insert_op(TId, Op, From, #state{trans=AllTrans, op_time=Time}=State) ->
 
 
 %% @private
-insert_ack(TId, #state{trans=AllTrans}=State) ->
+insert_ack(TId, Pid, #state{trans=AllTrans}=State) ->
+    Mon = case is_pid(Pid) of
+        true -> monitor(process, Pid);
+        false -> undefined
+    end,
     Trans = #trans{
         op = ack,
+        mon = Mon,
         timer = erlang:start_timer(1000*?ACK_TIME, self(), {nkapi_op_timeout, TId})
     },
     State#state{trans=maps:put(TId, Trans, AllTrans)}.
@@ -841,12 +861,23 @@ insert_ack(TId, #state{trans=AllTrans}=State) ->
 %% @private
 extract_op(TId, #state{trans=AllTrans}=State) ->
     case maps:find(TId, AllTrans) of
-        {ok, #trans{timer=Timer}=OldTrans} ->
+        {ok, #trans{mon=Mon, timer=Timer}=OldTrans} ->
             nklib_util:cancel_timer(Timer),
+            nklib_util:demonitor(Mon),
             State2 = State#state{trans=maps:remove(TId, AllTrans)},
             {OldTrans, State2};
         error ->
             not_found
+    end.
+
+%% @private
+extract_op_mon(Mon, #state{trans=AllTrans}=State) ->
+    case [TId || {TId, #trans{mon=M}} <- maps:to_list(AllTrans), M==Mon] of
+        [TId] ->
+            {OldTrans, State2} = extract_op(TId, State),
+            {true, TId, OldTrans, State2};
+        [] ->
+            false
     end.
 
 
@@ -857,6 +888,8 @@ extend_op(TId, #trans{timer=Timer}=Trans, #state{trans=AllTrans}=State) ->
     Timer2 = erlang:start_timer(1000*?ACK_TIME, self(), {nkapi_op_timeout, TId}),
     Trans2 = Trans#trans{timer=Timer2},
     State#state{trans=maps:put(TId, Trans2, AllTrans)}.
+
+
 
 
 %% @private
