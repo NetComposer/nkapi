@@ -28,7 +28,7 @@
 -export([reply/2, reply/3, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
 -export([init/2, terminate/3]).
 
--define(MAX_BODY, 10000000).
+-define(MAX_BODY, 100000).
 -define(MAX_ACK_TIME, 180).
 
 -include("nkapi.hrl").
@@ -246,7 +246,7 @@ process_event(Req, HttpReq, UserState) ->
 get_body(Req) ->
     case cowboy_req:body_length(Req) of
         BL when is_integer(BL), BL =< ?MAX_BODY ->
-            {ok, Body, _} = cowboy_req:body(Req),
+            {ok, Body, _} = cowboy_req:body(Req, [{length, infinity}]),
             case cowboy_req:header(<<"content-type">>, Req) of
                 <<"application/json">> ->
                     case nklib_json:decode(Body) of
