@@ -20,6 +20,7 @@
 
 %% @doc Implementation of the NkAPI External Interface (server)
 -module(nkapi_server).
+-behavior(nkservice_nkapi).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 -export([cmd/3, cmd_async/3, event/2]).
@@ -195,7 +196,7 @@ stop_all() ->
 
 %% @doc Registers a process with the session
 -spec register(id(), nklib:link()) ->
-    {ok, pid()} | {error, nkapi:error()}.
+    {ok, pid()} | {error, nkservice:error()}.
 
 register(Id, Link) ->
     do_cast(Id, {nkapi_register, Link}).
@@ -203,14 +204,14 @@ register(Id, Link) ->
 
 %% @doc Unregisters a process with the session
 -spec unregister(id(), nklib:link()) ->
-    ok | {error, nkapi:error()}.
+    ok | {error, nkservice:error()}.
 
 unregister(Id, Link) ->
     do_cast(Id, {nkapi_unregister, Link}).
 
 
 %% @doc Registers with the Events system
--spec subscribe(id(), nkapi:event()) ->
+-spec subscribe(id(), nkevent:event()) ->
     ok.
 
 subscribe(Id, #nkevent{}=Event) ->
@@ -228,7 +229,7 @@ subscribe(Id, Data) ->
 
 
 %% @doc Unregisters with the Events system
--spec unsubscribe(id(),  nkapi:event()) ->
+-spec unsubscribe(id(),  nkevent:event()) ->
     ok.
 
 unsubscribe(Id, #nkevent{}=Event) ->

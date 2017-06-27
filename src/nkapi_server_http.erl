@@ -25,6 +25,10 @@
 %% - callback api_server_http is called to process the message
 
 -module(nkapi_server_http).
+-behavior(nkservice_nkapi).
+
+-export([cmd/3, cmd_async/3, event/2, start_ping/2, stop_ping/1, stop/1, stop/2]).
+-export([register/2, unregister/2, subscribe/2, unsubscribe/2]).
 -export([reply/2, reply/3, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
 -export([init/2, terminate/3]).
 
@@ -52,9 +56,104 @@
 -type http_req() :: term().
 -type tid() :: integer().
 
+
+
+%% @doc
+-spec get_qs(http_req()) ->
+    list().
+
+get_qs(HttpReq) ->
+    cowboy_req:parse_qs(HttpReq).
+
+
+%% @doc
+-spec get_headers(http_req()) ->
+    list().
+
+get_headers(HttpReq) ->
+    cowboy_req:headers(HttpReq).
+
+
+%% @doc
+-spec get_basic_auth(http_req()) ->
+    {user, binary(), binary()} | undefined.
+
+get_basic_auth(HttpReq) ->
+    case cowboy_req:parse_header(<<"authorization">>, HttpReq) of
+        {basic, User, Pass} ->
+            {basic, User, Pass};
+        _ ->
+            undefined
+    end.
+
+
+%% @doc
+-spec get_peer(http_req()) ->
+    {inet:ip_address(), inet:port_number()}.
+
+get_peer(HttpReq) ->
+    {Ip, Port} = cowboy_req:peer(HttpReq),
+    {Ip, Port}.
+
+
+
 %% ===================================================================
-%% Public
+%% NKAPI
 %% ===================================================================
+
+
+%% @doc
+cmd(_Id, _Cmd, _Data) ->
+    {error, not_implemented}.
+
+
+%% @doc
+cmd_async(_Id, _Cmd, _Data) ->
+    {error, not_implemented}.
+
+%% @doc
+event(_Id, _Data) ->
+    {error, not_implemented}.
+
+
+%% @doc
+start_ping(_Id, _Secs) ->
+    {error, not_implemented}.
+
+
+%% @doc
+stop_ping(_Id) ->
+    {error, not_implemented}.
+
+
+%% @doc
+stop(_Id) ->
+    {error, not_implemented}.
+
+
+%% @doc
+stop(_Id, _Reason) ->
+    {error, not_implemented}.
+
+
+%% @doc
+register(_Id, _Link) ->
+    {error, not_implemented}.
+
+
+%% @doc
+unregister(_Id, _Link) ->
+    {error, not_implemented}.
+
+
+%% @doc
+subscribe(_Id, _Data) ->
+    {error, not_implemented}.
+
+
+%% @doc
+unsubscribe(_Id, _Data) ->
+    {error, not_implemented}.
 
 
 %% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
@@ -99,45 +198,6 @@ reply(Pid, TId, ack) ->
 reply(Pid, TId, {ack, Pid}) ->
     Pid ! {nkapi_reply_ack, TId, Pid},
     ok.
-
-
-%% @doc
--spec get_qs(http_req()) ->
-    list().
-
-get_qs(HttpReq) ->
-    cowboy_req:parse_qs(HttpReq).
-
-
-%% @doc
--spec get_headers(http_req()) ->
-    list().
-
-get_headers(HttpReq) ->
-    cowboy_req:headers(HttpReq).
-
-
-%% @doc
--spec get_basic_auth(http_req()) ->
-    {user, binary(), binary()} | undefined.
-
-get_basic_auth(HttpReq) ->
-    case cowboy_req:parse_header(<<"authorization">>, HttpReq) of
-        {basic, User, Pass} ->
-            {basic, User, Pass};
-        _ ->
-            undefined
-    end.
-
-
-%% @doc
--spec get_peer(http_req()) ->
-    {inet:ip_address(), inet:port_number()}.
-
-get_peer(HttpReq) ->
-    {Ip, Port} = cowboy_req:peer(HttpReq),
-    {Ip, Port}.
-
 
 
 %% ===================================================================

@@ -32,7 +32,7 @@
 
 -type continue() :: continue | {continue, list()}.
 -type config() :: nkapi:config().
-%%-type error_code() :: nkapi:error().
+%%-type error_code() :: nkservice:error().
 
 -include_lib("nkpacket/include/nkpacket.hrl").
 -include("nkapi.hrl").
