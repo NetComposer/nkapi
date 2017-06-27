@@ -27,7 +27,7 @@
 -module(nkapi_server_http).
 -behavior(nkservice_nkapi).
 
--export([cmd/3, cmd_async/3, event/2, start_ping/2, stop_ping/1, stop/1, stop/2]).
+-export([type/0, cmd/3, cmd_async/3, event/2, start_ping/2, stop_ping/1, stop/1, stop/2]).
 -export([register/2, unregister/2, subscribe/2, unsubscribe/2]).
 -export([reply/2, reply/3, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
 -export([init/2, terminate/3]).
@@ -101,6 +101,9 @@ get_peer(HttpReq) ->
 %% NKAPI
 %% ===================================================================
 
+%% @doc
+type() ->
+    http.
 
 %% @doc
 cmd(_Id, _Cmd, _Data) ->
@@ -164,8 +167,8 @@ unsubscribe(_Id, _Data) ->
             ack | {ack, pid()}) ->
        ok.
 
-reply(#nkreq{conn_id=Id, tid=TId}, Type) ->
-    reply(Id, TId, Type).
+reply(#nkreq{session_pid=Pid, tid=TId}, Type) ->
+    reply(Pid, TId, Type).
 
 
 %% @doc Sends a reply to a command (when you reply 'ack' in callbacks)
@@ -229,9 +232,9 @@ init(HttpReq, [{srv_id, SrvId}]) ->
         SessionId = nklib_util:luid(),
         Req = #nkreq{
             srv_id = SrvId,
-            conn_id = self(),
             session_module = ?MODULE,
             session_id = SessionId,
+            session_pid = self(),
             session_meta = #{remote => Remote},
             tid = erlang:phash2(SessionId),
             debug = Debug,

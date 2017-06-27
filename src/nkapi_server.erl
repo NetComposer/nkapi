@@ -23,7 +23,7 @@
 -behavior(nkservice_nkapi).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
--export([cmd/3, cmd_async/3, event/2]).
+-export([type/0, cmd/3, cmd_async/3, event/2]).
 -export([reply/2, reply/3]).
 -export([stop/1, stop/2, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
@@ -91,102 +91,74 @@
 %% Public
 %% ===================================================================
 
-%% @doc Send a command to the client and wait a response
--spec cmd(id(), nkservice:req_cmd(), nkapi:data()) ->
-    {ok, Result::binary(), Data::map()} | {error, term()}.
-
-cmd(Id, Cmd, Data) ->
-    do_call(Id, {nkapi_send_req, Cmd, Data}).
+%% @doc
+type() ->
+    session.
 
 
-%% @doc Send a command and don't wait for a response
--spec cmd_async(id(), nkservice:req_cmd(), nkapi:data()) ->
-    ok | {error, term()}.
-
-cmd_async(Id, Cmd, Data) ->
-    do_cast(Id, {nkapi_send_req, Cmd, Data}).
+%% @doc
+cmd(Pid, Cmd, Data) ->
+    do_call(Pid, {nkapi_send_req, Cmd, Data}).
 
 
-%% @doc Sends an event directly to the client (as it we were subscribed to it)
-%% Response is not expected from remote
--spec event(id(), map()|#nkevent{}) ->
-    ok | {error, term()}.
+%% @doc
+cmd_async(Pid, Cmd, Data) ->
+    do_cast(Pid, {nkapi_send_req, Cmd, Data}).
 
-event(Id, Data) ->
+
+%% @doc
+event(Pid, Data) ->
     case nkevent_util:parse(Data) of
         {ok, Event} ->
-            do_cast(Id, {nkapi_send_event, Event});
+            do_cast(Pid, {nkapi_send_event, Event});
         {error, Error} ->
             {error, Error}
     end.
 
 
 %% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
--spec reply(#nkreq{},
-            {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
-            {error, term()} |
-            {login, Reply::map(), User::binary(), UserMeta::map()} |
-            ack | {ack, pid()}) ->
-    ok.
-
-reply(#nkreq{conn_id=Id, tid=TId}, Type) ->
-    reply(Id, TId, Type).
+reply(#nkreq{session_pid=Pid, tid=TId}, Type) ->
+    reply(Pid, TId, Type).
 
 
 %% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
--spec reply(id(), tid(),
-            {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
-            {error, term()} |
-            {login, Reply::map(), User::binary(), UserMeta::map()} |
-            ack | {ack, pid()}) ->
-               ok.
+reply(Pid, TId, {ok, Reply}) ->
+    do_cast(Pid, {nkapi_reply_ok, TId, Reply});
 
-reply(Id, TId, {ok, Reply}) ->
-    do_cast(Id, {nkapi_reply_ok, TId, Reply});
+reply(Pid, TId, {ok, Reply, UserMeta}) ->
+    do_cast(Pid, {nkapi_reply_ok, TId, Reply, UserMeta});
 
-reply(Id, TId, {ok, Reply, UserMeta}) ->
-    do_cast(Id, {nkapi_reply_ok, TId, Reply, UserMeta});
+reply(Pid, TId, {error, Error}) ->
+    do_cast(Pid, {nkapi_reply_error, TId, Error});
 
-reply(Id, TId, {error, Error}) ->
-    do_cast(Id, {nkapi_reply_error, TId, Error});
+reply(Pid, TId, {login, Reply, User, UserMeta}) ->
+    do_cast(Pid, {nkapi_reply_login, TId, Reply, User, UserMeta});
 
-reply(Id, TId, {login, Reply, User, UserMeta}) ->
-    do_cast(Id, {nkapi_reply_login, TId, Reply, User, UserMeta});
+reply(Pid, TId, ack) ->
+    reply(Pid, TId, {ack, undefined});
 
-reply(Id, TId, ack) ->
-    reply(Id, TId, {ack, undefined});
-
-reply(Id, TId, {ack, Pid}) ->
-    do_cast(Id, {nkapi_reply_ack, Pid, TId}).
-
-
+reply(Pid, TId, {ack, AckPid}) ->
+    do_cast(Pid, {nkapi_reply_ack, AckPid, TId}).
 
 
 %% @doc Start sending pings
--spec start_ping(id(), integer()) ->
-    ok.
-
-start_ping(Id, Secs) ->
-    do_cast(Id, {nkapi_start_ping, Secs}).
+start_ping(Pid, Secs) ->
+    do_cast(Pid, {nkapi_start_ping, Secs}).
 
 
 %% @doc Stop sending pings
--spec stop_ping(id()) ->
-    ok.
-
-%% @doc 
-stop_ping(Id) ->
-    do_cast(Id, nkapi_stop_ping).
+stop_ping(Pid) ->
+    do_cast(Pid, nkapi_stop_ping).
 
 
 %% @doc Stops the server
-stop(Id) ->
-    stop(Id, user_stop).
+stop(Pid) ->
+    stop(Pid, user_stop).
 
 
 %% @doc Stops the server
-stop(Id, Reason) ->
-    do_cast(Id, {nkapi_stop, Reason}).
+stop(Pid, Reason) ->
+    do_cast(Pid, {nkapi_stop, Reason}).
 
 
 %% @doc Stops all clients
@@ -195,33 +167,27 @@ stop_all() ->
 
 
 %% @doc Registers a process with the session
--spec register(id(), nklib:link()) ->
-    {ok, pid()} | {error, nkservice:error()}.
-
-register(Id, Link) ->
-    do_cast(Id, {nkapi_register, Link}).
+register(Pid, Link) ->
+    do_cast(Pid, {nkapi_register, Link}).
 
 
 %% @doc Unregisters a process with the session
--spec unregister(id(), nklib:link()) ->
-    ok | {error, nkservice:error()}.
-
-unregister(Id, Link) ->
-    do_cast(Id, {nkapi_unregister, Link}).
+unregister(Pid, Link) ->
+    do_cast(Pid, {nkapi_unregister, Link}).
 
 
 %% @doc Registers with the Events system
 -spec subscribe(id(), nkevent:event()) ->
     ok.
 
-subscribe(Id, #nkevent{}=Event) ->
-    do_cast(Id, {nkapi_subscribe, Event});
+subscribe(Pid, #nkevent{}=Event) ->
+    do_cast(Pid, {nkapi_subscribe, Event});
 
-subscribe(Id, Data) ->
+subscribe(Pid, Data) ->
     case nkevent_util:parse_reg(Data) of
         {ok, Events} ->
             lists:foreach(
-                fun(#nkevent{}=Event) -> subscribe(Id, Event) end,
+                fun(#nkevent{}=Event) -> subscribe(Pid, Event) end,
                 Events);
         {error, Error} ->
             {error, Error}
@@ -232,14 +198,14 @@ subscribe(Id, Data) ->
 -spec unsubscribe(id(),  nkevent:event()) ->
     ok.
 
-unsubscribe(Id, #nkevent{}=Event) ->
-    do_cast(Id, {nkapi_unsubscribe, Event});
+unsubscribe(Pid, #nkevent{}=Event) ->
+    do_cast(Pid, {nkapi_unsubscribe, Event});
 
-unsubscribe(Id, Data) ->
+unsubscribe(Pid, Data) ->
     case nkevent_util:parse_reg(Data) of
         {ok, Events} ->
             lists:foreach(
-                fun(#nkevent{}=Event) -> unsubscribe(Id, Event) end,
+                fun(#nkevent{}=Event) -> unsubscribe(Pid, Event) end,
                 Events);
         {error, Error} ->
             {error, Error}
@@ -247,11 +213,8 @@ unsubscribe(Id, Data) ->
 
 
 %% @doc Unregisters with the Events system
--spec unsubscribe_fun(id(), fun((#nkevent{}) -> boolean())) ->
-    ok.
-
-unsubscribe_fun(Id, Fun) ->
-    do_cast(Id, {nkapi_unsubscribe_fun, Fun}).
+unsubscribe_fun(Pid, Fun) ->
+    do_cast(Pid, {nkapi_unsubscribe_fun, Fun}).
 
 
 %% @private
@@ -749,9 +712,9 @@ make_req(Cmd, Data, TId, State) ->
     } = State,
     #nkreq{
         srv_id = SrvId,
-        conn_id = self(),
         session_module = ?MODULE,
         session_id = SessId,
+        session_pid = self(),
         session_meta = #{local=>Local, remote=>Remote},
         tid = TId,
         cmd = Cmd,
@@ -786,44 +749,60 @@ process_login(Reply, TId, Unknown, NkPort, State) ->
 
 
 %% @private
-do_call(Id, Msg) ->
-    case find(Id) of
-        {ok, Pid} ->
-            case self() of
-                Pid -> {error, blocking_request};
-                _ -> nklib_util:call(Pid, Msg, 1000*?CALL_TIMEOUT)
-            end;
-        not_found ->
-            {error, not_found}
+do_call(Pid, Msg) ->
+    case self() of
+        Pid ->
+            {error, blocking_request};
+        _ ->
+            nklib_util:call(Pid, Msg, 1000*?CALL_TIMEOUT)
     end.
 
 
 %% @private
-do_cast(Id, Msg) ->
-    case find(Id) of
-        {ok, Pid} ->
-            gen_server:cast(Pid, Msg);
-        not_found ->
-            ok
-    end.
+do_cast(Pid, Msg) ->
+    gen_server:cast(Pid, Msg).
 
 
-%% @private
-find(Pid) when is_pid(Pid) ->
-    {ok, Pid};
+%%%% @private
+%%do_call(PidId, Msg) ->
+%%    case find(Id) of
+%%        {ok, Pid} ->
+%%            case self() of
+%%                Pid -> {error, blocking_request};
+%%                _ -> nklib_util:call(Pid, Msg, 1000*?CALL_TIMEOUT)
+%%            end;
+%%        not_found ->
+%%            {error, not_found}
+%%    end.
+%%
+%%
+%%%% @private
+%%do_cast(Id, Msg) ->
+%%    case find(Id) of
+%%        {ok, Pid} ->
+%%            gen_server:cast(Pid, Msg);
+%%        not_found ->
+%%            ok
+%%    end.
 
-find(Id) ->
-    case find_user(Id) of
-        [{_SessId, _Meta, Pid}|_] ->
-            {ok, Pid};
-        [] ->
-            case find_session(Id) of
-                {ok, _, Pid} ->
-                    {ok, Pid};
-                not_found ->
-                    not_found
-            end
-    end.
+
+
+%%%% @private
+%%find(Pid) when is_pid(Pid) ->
+%%    {ok, Pid};
+%%
+%%find(Id) ->
+%%    case find_user(Id) of
+%%        [{_SessId, _Meta, Pid}|_] ->
+%%            {ok, Pid};
+%%        [] ->
+%%            case find_session(Id) of
+%%                {ok, _, Pid} ->
+%%                    {ok, Pid};
+%%                not_found ->
+%%                    not_found
+%%            end
+%%    end.
 
 
 %% @private
