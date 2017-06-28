@@ -29,7 +29,7 @@
 
 -export([type/0, cmd/3, cmd_async/3, event/2, start_ping/2, stop_ping/1, stop/1, stop/2]).
 -export([register/2, unregister/2, subscribe/2, unsubscribe/2]).
--export([reply/2, reply/3, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
+-export([reply/1, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
 -export([init/2, terminate/3]).
 
 -define(MAX_BODY, 100000).
@@ -54,9 +54,6 @@
 %% ===================================================================
 
 -type http_req() :: term().
--type tid() :: integer().
-
-
 
 %% @doc
 -spec get_qs(http_req()) ->
@@ -159,47 +156,20 @@ unsubscribe(_Id, _Data) ->
     {error, not_implemented}.
 
 
-%% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
--spec reply(#nkreq{},
-            {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
-            {error, term()} |
-            {login, Reply::map(), User::binary(), UserMeta::map()} |
-            ack | {ack, pid()}) ->
-       ok.
-
-reply(#nkreq{session_pid=Pid, tid=TId}, Type) ->
-    reply(Pid, TId, Type).
-
-
 %% @doc Sends a reply to a command (when you reply 'ack' in callbacks)
--spec reply(pid(), tid(),
-            {ok, map()} | {ok, Reply::map(), UserMeta::map()} |
-            {error, term()} |
-            {login, Reply::map(), User::binary(), UserMeta::map()} |
-            ack | {ack, pid()}) ->
-       ok.
-
-reply(Pid, TId, {ok, Reply}) ->
+reply({ok, Reply, #nkreq{session_module=?MODULE, tid=TId, session_pid=Pid}}) ->
     Pid ! {nkapi_reply_ok, TId, Reply},
     ok;
 
-reply(Pid, TId, {ok, Reply, _UserMeta}) ->
-    Pid ! {nkapi_reply_ok, TId, Reply},
-    ok;
-
-reply(Pid, TId, {error, Error}) ->
+reply({error, Error, #nkreq{session_module=?MODULE, tid=TId, session_pid=Pid}}) ->
     Pid ! {nkapi_reply_error, TId, Error},
     ok;
 
-reply(Pid, TId, {login, Reply, User, UserMeta}) ->
-    Pid ! {nkapi_reply_login, TId, Reply, User, UserMeta},
-    ok;
+reply({ack, Req}) ->
+    reply({ack, undefined, Req});
 
-reply(Pid, TId, ack) ->
-    reply(Pid, TId, {ack, undefined});
-
-reply(Pid, TId, {ack, Pid}) ->
-    Pid ! {nkapi_reply_ack, TId, Pid},
+reply({ack, AckPid, #nkreq{session_module=?MODULE, tid=TId, session_pid=Pid}}) ->
+    Pid ! {nkapi_reply_ack, TId, AckPid},
     ok.
 
 
@@ -239,7 +209,8 @@ init(HttpReq, [{srv_id, SrvId}]) ->
             tid = erlang:phash2(SessionId),
             debug = Debug,
             cmd = Cmd,
-            data = Data
+            data = Data,
+            timeout_pending = false
         },
         case process_auth(Req, HttpReq) of
             {ok, Req2, UserState} ->
@@ -269,8 +240,12 @@ terminate(_Reason, _Req, _Opts) ->
 %% @private
 process_auth(#nkreq{srv_id=SrvId}=Req, HttpReq) ->
     case SrvId:api_server_http_auth(Req, HttpReq) of
-        {true, UserId, Meta, State} ->
-            {ok, Req#nkreq{user_id=UserId, user_meta=Meta}, State};
+        {true, UserId} ->
+            {ok, Req#nkreq{user_id=UserId}, #{}};
+        {true, UserId, #nkreq{}=Req2} ->
+            {ok, Req2#nkreq{user_id=UserId}, #{}};
+        {true, UserId, #nkreq{}=Req2, State} ->
+            {ok, Req2#nkreq{user_id=UserId}, State};
         false ->
             throw({403, [], <<"User forbidden">>});
         {error, Error} ->
@@ -281,16 +256,16 @@ process_auth(#nkreq{srv_id=SrvId}=Req, HttpReq) ->
 %% @private
 process_req(Req, HttpReq, UserState) ->
     case nkservice_api:api(Req, UserState) of
-        {ok, Reply, Unknown, _UserState2} ->
+        {ok, Reply, #nkreq{unknown_fields=Unknown}, _UserState} ->
             send_msg_ok(Reply, Unknown, HttpReq);
-        {ok, Reply, _UserMeta, Unknown, _UserState2} ->
-            send_msg_ok(Reply, Unknown, HttpReq);
-        {ack, Unknown, _UserState2} ->
-            wait_ack(undefined, Unknown, Req, HttpReq);
-        {ack, Pid, Unknown, _UserState2} ->
-            wait_ack(monitor(process, Pid), Unknown, Req, HttpReq);
-        {login, Reply, _UserId, _Meta, Unknown, _UserState2} ->
-            send_msg_ok(Reply, Unknown, HttpReq);
+        {ack, Pid, #nkreq{}=Req, _UserState2} ->
+            Mon = case is_pid(Pid) of
+                true ->
+                    monitor(process, Pid);
+                false ->
+                    undefined
+            end,
+            wait_ack(Mon, Req, HttpReq);
         {error, Error, _UserState2} ->
             send_msg_error(Error, Req, HttpReq)
     end.
@@ -353,7 +328,7 @@ get_body(Req) ->
 
 
 %% @private
-wait_ack(Mon, Unknown, #nkreq{tid=TId}=Req, HttpReq) ->
+wait_ack(Mon, #nkreq{tid=TId, unknown_fields=Unknown}=Req, HttpReq) ->
     receive
         {nkapi_reply_ok, TId, Reply} ->
             nklib_util:demonitor(Mon),
@@ -367,14 +342,14 @@ wait_ack(Mon, Unknown, #nkreq{tid=TId}=Req, HttpReq) ->
         {nkapi_reply_ack, TId, Pid} when is_pid(Pid) ->
             nklib_util:demonitor(Mon),
             Mon2 = monitor(process, Pid),
-            wait_ack(Mon2, Unknown, Req, HttpReq);
+            wait_ack(Mon2, Req, HttpReq);
         {nkapi_reply_ack, TId, _} ->
-            wait_ack(Mon, Unknown, Req, HttpReq);
+            wait_ack(Mon, Req, HttpReq);
         {'DOWN', Mon, process, _Pid, _Reason} ->
             send_msg_error(process_down, Req, HttpReq);
         Other ->
             ?LLOG(warning, "unexpected msg in wait_ack: ~p", [Other], Req),
-            wait_ack(Mon, Unknown, Req, HttpReq)
+            wait_ack(Mon, Req, HttpReq)
     after
         1000*?MAX_ACK_TIME ->
             nklib_util:demonitor(Mon),

@@ -24,7 +24,7 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 -export([type/0, cmd/3, cmd_async/3, event/2]).
--export([reply/2, reply/3]).
+-export([reply/1]).
 -export([stop/1, stop/2, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
 -export([subscribe/2, unsubscribe/2, unsubscribe_fun/2]).
@@ -116,29 +116,18 @@ event(Pid, Data) ->
     end.
 
 
-%% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
-reply(#nkreq{session_pid=Pid, tid=TId}, Type) ->
-    reply(Pid, TId, Type).
+%% doc
+reply({ok, Reply, #nkreq{session_module=?MODULE, session_pid=Pid}=Req}) ->
+    do_cast(Pid, {nkapi_reply_ok, Reply, Req});
 
+reply({error, Error, #nkreq{session_module=?MODULE, session_pid=Pid}=Req}) ->
+    do_cast(Pid, {nkapi_reply_error, Error, Req});
 
-%% @doc Sends an ok reply to a command (when you reply 'ack' in callbacks)
-reply(Pid, TId, {ok, Reply}) ->
-    do_cast(Pid, {nkapi_reply_ok, TId, Reply});
+reply({ack, #nkreq{session_module=?MODULE, session_pid=Pid}=Req}) ->
+    do_cast(Pid, {nkapi_reply_ack, undefined, Req});
 
-reply(Pid, TId, {ok, Reply, UserMeta}) ->
-    do_cast(Pid, {nkapi_reply_ok, TId, Reply, UserMeta});
-
-reply(Pid, TId, {error, Error}) ->
-    do_cast(Pid, {nkapi_reply_error, TId, Error});
-
-reply(Pid, TId, {login, Reply, User, UserMeta}) ->
-    do_cast(Pid, {nkapi_reply_login, TId, Reply, User, UserMeta});
-
-reply(Pid, TId, ack) ->
-    reply(Pid, TId, {ack, undefined});
-
-reply(Pid, TId, {ack, AckPid}) ->
-    do_cast(Pid, {nkapi_reply_ack, AckPid, TId}).
+reply({ack, AckPid, #nkreq{session_module=?MODULE, session_pid=Pid}=Req}) ->
+    do_cast(Pid, {nkapi_reply_ack, AckPid, Req}).
 
 
 %% @doc Start sending pings
@@ -291,8 +280,7 @@ find_session(SessId) ->
     local :: binary(),
     remote :: binary(),
     user_id = <<>> :: nkservice:user_id(),
-    user_meta = #{} :: nkservice:user_meta(),
-    user_state = #{} :: map()
+    user_state = #{} :: nkservice:user_state()
 }).
 
 
@@ -436,55 +424,48 @@ conn_handle_cast({nkapi_send_req, Cmd, Data}, NkPort, State) ->
 conn_handle_cast({nkapi_send_event, Event}, NkPort, State) ->
     send_event(Event, NkPort, State);
 
-conn_handle_cast({nkapi_reply_ok, TId, Data}, NkPort, State) ->
-    #state{user_meta=UserMeta} = State,
-    conn_handle_cast({nkapi_reply_ok, TId, Data, UserMeta}, NkPort, State);
-
-conn_handle_cast({nkapi_reply_ok, TId, Data, UserMeta}, NkPort, State) ->
-    State2 = State#state{user_meta=UserMeta},
+conn_handle_cast({nkapi_reply_ok, Reply, Req}, NkPort, #state{user_id=UserId}=State) ->
+    #nkreq{tid=TId, user_state=UserState, user_id=UserId2, unknown_fields=Unknown} = Req,
+    State2 = State#state{user_state=UserState},
     case extract_op(TId, State2) of
         {#trans{op=ack}, State3} ->
-            send_reply_ok(Data, TId, [], NkPort, State3);
+            case UserId == <<>> andalso UserId2 /= <<>> of
+                true ->
+                    State4 = State3#state{user_id=UserId2},
+                    process_login(Reply, TId, Unknown, NkPort, State4);
+                false when UserId /= UserId2 ->
+                    send_reply_error(invalid_login_request, TId, NkPort, State3);
+                false ->
+                   send_reply_ok(Reply, TId, Unknown, NkPort, State3)
+           end;
         not_found ->
             ?LLOG(notice, "received user reply_ok for unknown req: ~p ~p",
                   [TId, State#state.trans], State),
-            {ok, State}
+            {ok, State2}
     end;
 
-conn_handle_cast({nkapi_reply_login, TId, Reply, User, Meta}, NkPort, State) ->
-    case extract_op(TId, State) of
-        {#trans{op=ack}, State2} ->
-            case State2 of
-                #state{user_id = <<>>} ->
-                    State3 = State2#state{user_id=User, user_meta=Meta},
-                    process_login(Reply, TId, [], NkPort, State3);
-                _ ->
-                    send_reply_error(already_authenticated, TId, NkPort, State2)
-            end;
-        not_found ->
-            ?LLOG(notice, "received user nkapi_reply_login for unknown req: ~p ~p", 
-                  [TId, State#state.trans], State), 
-            {ok, State}
-    end;
-
-conn_handle_cast({nkapi_reply_error, TId, Code}, NkPort, State) ->
-    case extract_op(TId, State) of
-        {#trans{op=ack}, State2} ->
-            send_reply_error(Code, TId, NkPort, State2);
+conn_handle_cast({nkapi_reply_error, Code, Req}, NkPort, State) ->
+    #nkreq{tid=TId, user_state=UserState} = Req,
+    State2 = State#state{user_state=UserState},
+    case extract_op(TId, State2) of
+        {#trans{op=ack}, State3} ->
+            send_reply_error(Code, TId, NkPort, State3);
         not_found ->
             ?LLOG(notice, "received user reply_error for unknown req: ~p ~p", 
-                  [TId, State#state.trans], State), 
-            {ok, State}
+                  [TId, State#state.trans], State2),
+            {ok, State2}
     end;
 
-conn_handle_cast({nkapi_reply_ack, Pid, TId}, NkPort, State) ->
-    case extract_op(TId, State) of
-        {#trans{op=ack}, State2} ->
-            State3 = insert_ack(TId, Pid, State2),
-            send_ack(TId, [], NkPort, State3);
+conn_handle_cast({nkapi_reply_ack, Pid, Req}, NkPort, State) ->
+    #nkreq{tid=TId, user_state=UserState, unknown_fields=Unknown} = Req,
+    State2 = State#state{user_state=UserState},
+    case extract_op(TId, State2) of
+        {#trans{op=ack}, State3} ->
+            State4 = insert_ack(TId, Pid, State3),
+            send_ack(TId, Unknown, NkPort, State4);
         not_found ->
             ?LLOG(notice, "received user reply_ack for unknown req", [], State), 
-            {ok, State}
+            {ok, State2}
     end;
 
 conn_handle_cast({nkapi_stop, Reason}, _NkPort, State) ->
@@ -635,45 +616,38 @@ conn_stop(Reason, _NkPort, #state{trans=Trans}=State) ->
 %% ===================================================================
 
 %% @private
-process_client_req(Cmd, Data, TId, NkPort, #state{user_state=UserState}=State) ->
+process_client_req(Cmd, Data, TId, NkPort, #state{user_id=UserId}=State) ->
     Req = make_req(Cmd, Data, TId, State),
-    case nkservice_api:api(Req, UserState) of
-        {ok, Reply, Unknown, UserState2} ->
-            State2 = State#state{user_state=UserState2},
-            send_reply_ok(Reply, TId, Unknown, NkPort, State2);
-        {ok, Reply, UserMeta, Unknown, UserState2} ->
-            State2 = State#state{user_meta=UserMeta, user_state=UserState2},
-            send_reply_ok(Reply, TId, Unknown, NkPort, State2);
-        {ack, Unknown, UserState2} ->
-            State2 = State#state{user_state=UserState2},
-            State3 = insert_ack(TId, undefined, State2),
-            send_ack(TId, Unknown, NkPort, State3);
-        {ack, Pid, Unknown, UserState2} ->
-            State2 = State#state{user_state=UserState2},
+    case nkservice_api:api(Req) of
+        {ok, Reply, #nkreq{user_id=UserId2, user_state=UserState, unknown_fields=Unknown}} ->
+            case UserId == <<>> andalso UserId2 /= <<>> of
+                true ->
+                    State2 = State#state{user_id=UserId, user_state=UserState},
+                    process_login(Reply, TId, Unknown, NkPort, State2);
+                false when UserId /= UserId2 ->
+                    send_reply_error(invalid_login_request, TId, NkPort, State);
+                false ->
+                    State2 = State#state{user_state=UserState},
+                    send_reply_ok(Reply, TId, Unknown, NkPort, State2)
+            end;
+        {ack, Pid, #nkreq{user_state=UserState, unknown_fields=Unknown}} ->
+            State2 = State#state{user_state=UserState},
             State3 = insert_ack(TId, Pid, State2),
             send_ack(TId, Unknown, NkPort, State3);
-        {login, Reply, UserId, Meta, Unknown, UserState2} ->
-            case State of
-                #state{user_id = <<>>} ->
-                    State2 = State#state{user_id=UserId, user_meta=Meta, user_state=UserState2},
-                    process_login(Reply, TId, Unknown, NkPort, State2);
-                _ ->
-                    send_reply_error(already_authenticated, TId, NkPort, State)
-            end;
-        {error, Error, UserState2} ->
-            State2 = State#state{user_state=UserState2},
+        {error, Error, #nkreq{user_state=UserState}} ->
+            State2 = State#state{user_state=UserState},
             send_reply_error(Error, TId, NkPort, State2)
     end.
 
 
 %% @private
-process_client_event(Data, #state{user_state=UserState}=State) ->
+process_client_event(Data, State) ->
     Req = make_req(<<"event">>, Data, <<>>, State),
-    case nkservice_api:event(Req, UserState) of
-        {ok, UserState2} ->
-            {ok, State#state{user_state=UserState2}};
-        {error, _Error, UserState2} ->
-            {ok, State#state{user_state=UserState2}}
+    case nkservice_api:event(Req) of
+        ok ->
+            {ok, State};
+        {error, _Error} ->
+            {ok, State}
     end.
 
 
@@ -706,7 +680,7 @@ make_req(Cmd, Data, TId, State) ->
         srv_id = SrvId,
         session_id = SessId,
         user_id = UserId,
-        user_meta = UserMeta,
+        user_state = UserState,
         local = Local,
         remote = Remote
     } = State,
@@ -720,17 +694,18 @@ make_req(Cmd, Data, TId, State) ->
         cmd = Cmd,
         data = Data,
         user_id = UserId,
-        user_meta = UserMeta,
+        user_state = UserState,
+        timeout_pending = true,
         debug = get(nkapi_server_debug)
     }.
 
 
 %% @private
 process_login(Reply, TId, Unknown, NkPort, State) ->
-    #state{srv_id=SrvId, session_id=SessId, user_id=UserId, user_meta=Meta} = State,
+    #state{srv_id=SrvId, session_id=SessId, user_id=UserId, user_state=UserState} = State,
     nklib_proc:put(?MODULE, {UserId, SessId}),
     nklib_proc:put({?MODULE, SrvId}, {UserId, SessId}),
-    nklib_proc:put({?MODULE, user, UserId}, {SessId, Meta}),
+    nklib_proc:put({?MODULE, user, UserId}, {SessId, UserState}),
     nklib_proc:put({?MODULE, session, SessId}, UserId),
     Event1 = #nkevent{
         srv_id = SrvId,

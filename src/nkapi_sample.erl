@@ -324,16 +324,16 @@ service_api_allow(_Req, State) ->
 
 
 %% @doc Called on any command
-service_api_cmd(#nkreq{cmd = <<"nkapi_test_login">>, session_id=SessId, data=Data}, State) ->
+service_api_cmd(#nkreq{cmd = <<"nkapi_test_login">>, session_id=SessId, data=Data}) ->
     case Data of
         #{user:=User, password:=<<"1234">>} ->
             Meta = maps:get(meta, Data, #{}),
-            {login, #{login=>ok, sess=>SessId}, User, Meta, State};
+            {login, #{login=>ok, sess=>SessId}, User, Meta};
         _ ->
-            {error, invalid_user, State}
+            {error, invalid_user}
     end;
 
-service_api_cmd(_Req, _State) ->
+service_api_cmd(_Req) ->
     continue.
 
 

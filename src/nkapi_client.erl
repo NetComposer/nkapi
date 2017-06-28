@@ -504,7 +504,7 @@ make_req(Cmd, Data, TId, State) ->
         cmd = Cmd,
         data = Data,
         user_id = UserId,
-        user_meta = UserState
+        user_state = UserState
     }.
 
 
