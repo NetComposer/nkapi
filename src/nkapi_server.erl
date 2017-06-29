@@ -23,7 +23,7 @@
 -behavior(nkservice_nkapi).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
--export([type/0, cmd/3, cmd_async/3, event/2]).
+-export([type/0, cmd/3, cmd_async/3, event/2, event2/2]).
 -export([reply/1]).
 -export([stop/1, stop/2, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
@@ -110,10 +110,23 @@ cmd_async(Pid, Cmd, Data) ->
 event(Pid, Data) ->
     case nkevent_util:parse(Data) of
         {ok, Event} ->
-            do_cast(Pid, {nkapi_send_event, Event});
+            Pid ! {nkevent, Event},
+            ok;
         {error, Error} ->
             {error, Error}
     end.
+
+
+
+
+event2(Pid, Data) ->
+    case nkevent_util:parse(Data) of
+        {ok, Event} ->
+            do_cast(Pid, {nkapi_send_event2, Event});
+        {error, Error} ->
+            {error, Error}
+    end.
+
 
 
 %% doc
@@ -421,8 +434,12 @@ conn_handle_call(Msg, From, _NkPort, State) ->
 conn_handle_cast({nkapi_send_req, Cmd, Data}, NkPort, State) ->
     send_request(Cmd, Data, undefined, NkPort, State);
 
-conn_handle_cast({nkapi_send_event, Event}, NkPort, State) ->
-    send_event(Event, NkPort, State);
+%%conn_handle_cast({nkapi_send_event, Event}, NkPort, State) ->
+%%    send_event(Event, NkPort, State);
+
+conn_handle_cast({nkapi_send_event2, Event}, NkPort, State) ->
+    Msg = nkevent_util:unparse2(Event),
+    send(Msg, NkPort, State);
 
 conn_handle_cast({nkapi_reply_ok, Reply, Req}, NkPort, #state{user_id=UserId}=State) ->
     #nkreq{tid=TId, user_state=UserState, user_id=UserId2, unknown_fields=Unknown} = Req,
@@ -548,7 +565,7 @@ conn_handle_info(nkapi_send_ping, NkPort, #state{ping=Time}=State) ->
 
 %% We receive an event we are subscribed to.
 conn_handle_info({nkevent, Event}, NkPort, State) ->
-    send_event(Event, NkPort, State);
+    process_server_event(Event, NkPort, State);
 
 conn_handle_info({timeout, _, {nkapi_op_timeout, TId}}, _NkPort, State) ->
     case extract_op(TId, State) of
@@ -643,7 +660,7 @@ process_client_req(Cmd, Data, TId, NkPort, #state{user_id=UserId}=State) ->
 %% @private
 process_client_event(Data, State) ->
     Req = make_req(<<"event">>, Data, <<>>, State),
-    case nkservice_api:event(Req) of
+    case nkservice_api:api(Req) of
         ok ->
             {ok, State};
         {error, _Error} ->
@@ -655,6 +672,22 @@ process_client_event(Data, State) ->
 process_client_resp(Result, Data, #trans{from=From}, _NkPort, State) ->
     nklib_util:reply(From, {ok, Result, Data}),
     {ok, State}.
+
+
+%% @private
+process_server_event(Event, NkPort, State) ->
+    Req = make_req(<<"event">>, nkevent_util:unparse(Event), <<>>, State),
+    case nkservice_api:event(Req) of
+        ok ->
+            {ok, State};
+        {forward, #nkreq{data=Data2}} ->
+            Msg = #{
+                cmd => <<"event">>,
+                data => Data2
+            },
+            send(Msg, NkPort, State)
+    end.
+
 
 
 
@@ -736,48 +769,6 @@ do_call(Pid, Msg) ->
 %% @private
 do_cast(Pid, Msg) ->
     gen_server:cast(Pid, Msg).
-
-
-%%%% @private
-%%do_call(PidId, Msg) ->
-%%    case find(Id) of
-%%        {ok, Pid} ->
-%%            case self() of
-%%                Pid -> {error, blocking_request};
-%%                _ -> nklib_util:call(Pid, Msg, 1000*?CALL_TIMEOUT)
-%%            end;
-%%        not_found ->
-%%            {error, not_found}
-%%    end.
-%%
-%%
-%%%% @private
-%%do_cast(Id, Msg) ->
-%%    case find(Id) of
-%%        {ok, Pid} ->
-%%            gen_server:cast(Pid, Msg);
-%%        not_found ->
-%%            ok
-%%    end.
-
-
-
-%%%% @private
-%%find(Pid) when is_pid(Pid) ->
-%%    {ok, Pid};
-%%
-%%find(Id) ->
-%%    case find_user(Id) of
-%%        [{_SessId, _Meta, Pid}|_] ->
-%%            {ok, Pid};
-%%        [] ->
-%%            case find_session(Id) of
-%%                {ok, _, Pid} ->
-%%                    {ok, Pid};
-%%                not_found ->
-%%                    not_found
-%%            end
-%%    end.
 
 
 %% @private
@@ -879,14 +870,14 @@ send_request(Cmd, Data, From, NkPort, #state{tid=TId}=State) ->
 %%    event(self(), Event).
 
 
-%% @private
-send_event(Event, NkPort, State) ->
-    #state{srv_id=_SrvId} = State,
-    Msg = #{
-        cmd => <<"event">>,
-        data => nkevent_util:unparse(Event)
-    },
-    send(Msg, NkPort, State).
+%%%% @private
+%%send_event(Event, NkPort, State) ->
+%%    #state{srv_id=_SrvId} = State,
+%%    Msg = #{
+%%        cmd => <<"event">>,
+%%        data => nkevent_util:unparse(Event)
+%%    },
+%%    send(Msg, NkPort, State).
 
 
 %% @private
