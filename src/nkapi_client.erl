@@ -237,6 +237,8 @@ conn_parse({text, Text}, NkPort, State) ->
     case Msg of
         #{<<"cmd">> := <<"event">>, <<"data">> := Data} ->
             process_server_event(Data, State);
+        #{<<"event">> := Event, <<"data">> := Data} ->
+            process_server_event2(Event, Data, State);
         #{<<"cmd">> := <<"ping">>, <<"tid">> := TId} ->
             send_reply_ok(#{}, TId, NkPort, State);
         #{<<"cmd">> := Cmd, <<"tid">> := TId} ->
@@ -379,6 +381,17 @@ process_server_req(Cmd, Data, TId, NkPort, State) ->
 %% @private
 process_server_event(Data, State) ->
     Req = make_req(<<"event">>, Data, <<>>, State),
+    #state{callback=CB, user_state = UserState} = State,
+    case CB(Req, UserState) of
+        {ok, UserState2} ->
+            {ok, State#state{user_state=UserState2}};
+        {ok, _Reply, UserState2} ->
+            {ok, State#state{user_state=UserState2}}
+    end.
+
+
+process_server_event2(Event, Data, State) ->
+    Req = make_req(<<"event">>, Data#{event=>Event}, <<>>, State),
     #state{callback=CB, user_state = UserState} = State,
     case CB(Req, UserState) of
         {ok, UserState2} ->
