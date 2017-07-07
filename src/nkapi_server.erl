@@ -20,14 +20,14 @@
 
 %% @doc Implementation of the NkAPI External Interface (server)
 -module(nkapi_server).
--behavior(nkservice_nkapi).
+-behavior(nkservice_session).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
--export([type/0, cmd/3, cmd_async/3, event/2, event2/2]).
--export([reply/1]).
--export([stop/1, stop/2, stop_all/0, start_ping/2, stop_ping/1]).
+-export([cmd/3, cmd_async/3, send_event/2, send_event2/2]).
+-export([reply/2]).
+-export([stop_session/2, stop_all/0, start_ping/2, stop_ping/1]).
 -export([register/2, unregister/2]).
--export([subscribe/2, unsubscribe/2, unsubscribe_fun/2]).
+-export([subscribe/2, unsubscribe/2]).
 -export([find_user/1, find_session/1, get_subscriptions/1]).
 -export([transports/1, default_port/1]).
 -export([conn_init/1, conn_encode/2, conn_parse/3, conn_handle_call/4, 
@@ -76,9 +76,6 @@
 %% Types
 %% ===================================================================
 
--type id() :: pid() | nkapi:id().
-
-
 -type session_meta() :: #{
     local => binary(),
     remote => binary()
@@ -88,12 +85,8 @@
 
 
 %% ===================================================================
-%% Public
+%% nkservice_session behaviour
 %% ===================================================================
-
-%% @doc
-type() ->
-    session.
 
 
 %% @doc
@@ -107,7 +100,7 @@ cmd_async(Pid, Cmd, Data) ->
 
 
 %% @doc
-event(Pid, Data) ->
+send_event(Pid, Data) ->
     case nkevent_util:parse(Data) of
         {ok, Event} ->
             Pid ! {nkevent, Event},
@@ -119,7 +112,7 @@ event(Pid, Data) ->
 
 
 
-event2(Pid, Data) ->
+send_event2(Pid, Data) ->
     case nkevent_util:parse(Data) of
         {ok, Event} ->
             do_cast(Pid, {nkapi_send_event2, Event});
@@ -130,16 +123,16 @@ event2(Pid, Data) ->
 
 
 %% doc
-reply({ok, Reply, #nkreq{session_module=?MODULE, session_pid=Pid}=Req}) ->
+reply(Pid, {ok, Reply, Req}) ->
     do_cast(Pid, {nkapi_reply_ok, Reply, Req});
 
-reply({error, Error, #nkreq{session_module=?MODULE, session_pid=Pid}=Req}) ->
+reply(Pid, {error, Error, Req}) ->
     do_cast(Pid, {nkapi_reply_error, Error, Req});
 
-reply({ack, #nkreq{session_module=?MODULE, session_pid=Pid}=Req}) ->
+reply(Pid, {ack, Req}) ->
     do_cast(Pid, {nkapi_reply_ack, undefined, Req});
 
-reply({ack, AckPid, #nkreq{session_module=?MODULE, session_pid=Pid}=Req}) ->
+reply(Pid, {ack, AckPid, Req}) ->
     do_cast(Pid, {nkapi_reply_ack, AckPid, Req}).
 
 
@@ -153,21 +146,6 @@ stop_ping(Pid) ->
     do_cast(Pid, nkapi_stop_ping).
 
 
-%% @doc Stops the server
-stop(Pid) ->
-    stop(Pid, user_stop).
-
-
-%% @doc Stops the server
-stop(Pid, Reason) ->
-    do_cast(Pid, {nkapi_stop, Reason}).
-
-
-%% @doc Stops all clients
-stop_all() ->
-    lists:foreach(fun({_User, _SessId, Pid}) -> stop(Pid) end, get_all()).
-
-
 %% @doc Registers a process with the session
 register(Pid, Link) ->
     do_cast(Pid, {nkapi_register, Link}).
@@ -179,9 +157,6 @@ unregister(Pid, Link) ->
 
 
 %% @doc Registers with the Events system
--spec subscribe(id(), nkevent:event()) ->
-    ok.
-
 subscribe(Pid, #nkevent{}=Event) ->
     do_cast(Pid, {nkapi_subscribe, Event});
 
@@ -197,9 +172,6 @@ subscribe(Pid, Data) ->
 
 
 %% @doc Unregisters with the Events system
--spec unsubscribe(id(),  nkevent:event()) ->
-    ok.
-
 unsubscribe(Pid, #nkevent{}=Event) ->
     do_cast(Pid, {nkapi_unsubscribe, Event});
 
@@ -214,9 +186,18 @@ unsubscribe(Pid, Data) ->
     end.
 
 
-%% @doc Unregisters with the Events system
-unsubscribe_fun(Pid, Fun) ->
-    do_cast(Pid, {nkapi_unsubscribe_fun, Fun}).
+%%%% @doc Unregisters with the Events system
+%%unsubscribe_fun(Pid, Fun) ->
+%%    do_cast(Pid, {nkapi_unsubscribe_fun, Fun}).
+
+%% @doc Gets all current subscriptions
+get_subscriptions(Pid) ->
+    do_call(Pid, nkapi_get_subscriptions).
+
+
+%% @doc
+stop_session(Pid, Reason) ->
+    do_cast(Pid, {nkapi_stop, Reason}).
 
 
 %% @private
@@ -235,9 +216,12 @@ get_all(SrvId) ->
     [{User, SessId, Pid} || {{User, SessId}, Pid} <- nklib_proc:values({?MODULE, SrvId})].
 
 
-%% @private
-get_subscriptions(Id) ->
-    do_call(Id, nkapi_get_subscriptions).
+%% @doc Stops all clients
+stop_all() ->
+    lists:foreach(
+        fun({_User, _SessId, Pid}) -> stop_session(Pid, stop_all) end,
+        get_all()).
+
 
 
 %% @private
@@ -362,7 +346,7 @@ conn_parse({text, Text}, NkPort, State) ->
         #{<<"cmd">> := <<"event">>, <<"data">> := Data} ->
             ?MSG("received event ~s", [Data], State),
             process_client_event(Data, State);
-        #{<<"result">> := Result, <<"tid">> := TId} ->
+        #{<<"result">> := Result, <<"tid">> := TId} when is_binary(Result) ->
             case extract_op(TId, State) of
                 {Trans, State2} ->
                     case Trans of
@@ -417,7 +401,7 @@ conn_handle_call({nkapi_send_req, Cmd, Data}, From, NkPort, State) ->
     
 conn_handle_call(nkapi_get_subscriptions, From, _NkPort, #state{regs=Regs}=State) ->
     Data = [nkevent_util:unparse(Event) || #reg{event=Event} <- Regs],
-    gen_server:reply(From, Data),
+    gen_server:reply(From, {ok, Data}),
     {ok, State};
 
 conn_handle_call(get_state, From, _NkPort, State) ->
@@ -594,7 +578,7 @@ conn_handle_info({'DOWN', Ref, process, _Pid, Reason}=Info, NkPort, State) ->
                             {ok, State3};
                         {stop, Reason2, State3} ->
                             ?LLOG(notice, "linked process stop: ~p", [Reason2], State),
-                            stop(self(), Reason2),
+                            stop_session(self(), Reason2),
                             {ok, State3}
                     end;
                 not_found ->

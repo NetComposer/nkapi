@@ -41,21 +41,21 @@ syntax(<<"event/send">>, Syntax) ->
     Ev = nkevent_util:syntax(false),
     maps:merge(Syntax, Ev);
 
-syntax(<<"event/send_to_user">>, Syntax) ->
-    Syntax#{
-        user_id => binary,
-        type => binary,
-        body => map,
-        '__mandatory' => [user_id]
-    };
-
-syntax(<<"event/send_to_session">>, Syntax) ->
-    Syntax#{
-        session_id => binary,
-        type => binary,
-        body => map,
-        '__mandatory' => [session_id]
-    };
+%%syntax(<<"event/send_to_user">>, Syntax) ->
+%%    Syntax#{
+%%        user_id => binary,
+%%        type => binary,
+%%        body => map,
+%%        '__mandatory' => [user_id]
+%%    };
+%%
+%%syntax(<<"event/send_to_session">>, Syntax) ->
+%%    Syntax#{
+%%        session_id => binary,
+%%        type => binary,
+%%        body => map,
+%%        '__mandatory' => [session_id]
+%%    };
 
 syntax(<<"session/ping">>, Syntax) ->
     Syntax#{time=>integer};
@@ -65,10 +65,9 @@ syntax(<<"session/stop">>, Syntax) ->
 
 syntax(<<"session/cmd">>, Syntax) ->
     Syntax#{
-        session_id => binary,
         cmd => binary,
         data => map,
-        '__mandatory' => [session_id, cmd]
+        '__mandatory' => [session_id, data, cmd]
     };
 
 syntax(<<"session/log">>, Syntax) ->

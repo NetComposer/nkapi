@@ -25,11 +25,11 @@
 %% - callback api_server_http is called to process the message
 
 -module(nkapi_server_http).
--behavior(nkservice_nkapi).
+-behavior(nkservice_session).
 
--export([type/0, cmd/3, cmd_async/3, event/2, start_ping/2, stop_ping/1, stop/1, stop/2]).
--export([register/2, unregister/2, subscribe/2, unsubscribe/2]).
--export([reply/1, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
+-export([cmd/3, cmd_async/3, send_event/2, start_ping/2, stop_ping/1, stop_session/2]).
+-export([register/2, unregister/2, subscribe/2, unsubscribe/2, get_subscriptions/1]).
+-export([reply/2, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
 -export([init/2, terminate/3]).
 
 -define(MAX_BODY, 100000).
@@ -99,76 +99,72 @@ get_peer(HttpReq) ->
 %% ===================================================================
 
 %% @doc
-type() ->
-    http.
-
-%% @doc
-cmd(_Id, _Cmd, _Data) ->
-    {error, not_implemented}.
+cmd(_Pid, _Cmd, _Data) ->
+    {error, invalid_session}.
 
 
 %% @doc
-cmd_async(_Id, _Cmd, _Data) ->
-    {error, not_implemented}.
+cmd_async(_Pid, _Cmd, _Data) ->
+    {error, invalid_session}.
 
 %% @doc
-event(_Id, _Data) ->
-    {error, not_implemented}.
-
-
-%% @doc
-start_ping(_Id, _Secs) ->
-    {error, not_implemented}.
+send_event(_Pid, _Data) ->
+    {error, invalid_session}.
 
 
 %% @doc
-stop_ping(_Id) ->
-    {error, not_implemented}.
+start_ping(_Pid, _Secs) ->
+    {error, invalid_session}.
 
 
 %% @doc
-stop(_Id) ->
-    {error, not_implemented}.
+stop_ping(_Pid) ->
+    {error, invalid_session}.
 
 
 %% @doc
-stop(_Id, _Reason) ->
-    {error, not_implemented}.
+stop_session(_Pid, _Reason) ->
+    {error, invalid_session}.
 
 
 %% @doc
-register(_Id, _Link) ->
-    {error, not_implemented}.
+register(_Pid, _Link) ->
+    {error, invalid_session}.
 
 
 %% @doc
-unregister(_Id, _Link) ->
-    {error, not_implemented}.
+unregister(_Pid, _Link) ->
+    {error, invalid_session}.
 
 
 %% @doc
-subscribe(_Id, _Data) ->
-    {error, not_implemented}.
+subscribe(_Pid, _Data) ->
+    {error, invalid_session}.
 
 
 %% @doc
-unsubscribe(_Id, _Data) ->
-    {error, not_implemented}.
+unsubscribe(_Pid, _Data) ->
+    {error, invalid_session}.
+
+
+%% @doc
+get_subscriptions(_Pid) ->
+    {error, invalid_session}.
 
 
 %% @doc Sends a reply to a command (when you reply 'ack' in callbacks)
-reply({ok, Reply, #nkreq{session_module=?MODULE, tid=TId, session_pid=Pid}}) ->
+reply(Pid, {ok, Reply, #nkreq{session_module=?MODULE, tid=TId}}) ->
     Pid ! {nkapi_reply_ok, TId, Reply},
     ok;
 
-reply({error, Error, #nkreq{session_module=?MODULE, tid=TId, session_pid=Pid}}) ->
+reply(Pid, {error, Error, #nkreq{session_module=?MODULE, tid=TId}}) ->
     Pid ! {nkapi_reply_error, TId, Error},
     ok;
 
-reply({ack, Req}) ->
-    reply({ack, undefined, Req});
+reply(Pid, {ack, Req}) ->
+    reply(Pid, {ack, undefined, Req});
 
-reply({ack, AckPid, #nkreq{session_module=?MODULE, tid=TId, session_pid=Pid}}) ->
+reply(Pid, {ack, AckPid, #nkreq{session_module=?MODULE, tid=TId}}) ->
     Pid ! {nkapi_reply_ack, TId, AckPid},
     ok.
 
