@@ -268,6 +268,7 @@ find_session(SessId) ->
 -record(state, {
     srv_id :: nkservice:id(),
     session_id :: nkservice:session_id(),
+    session_manager = undefined :: term(),
     trans = #{} :: #{tid() => #trans{}},
     tid = 1 :: integer(),
     ping :: integer() | undefined,
@@ -400,7 +401,7 @@ conn_handle_call({nkapi_send_req, Cmd, Data}, From, NkPort, State) ->
     send_request(Cmd, Data, From, NkPort, State);
     
 conn_handle_call(nkapi_get_subscriptions, From, _NkPort, #state{regs=Regs}=State) ->
-    Data = [nkevent_util:unparse(Event) || #reg{event=Event} <- Regs],
+    Data = [nkevent_util:unparse2(Event) || #reg{event=Event} <- Regs],
     gen_server:reply(From, {ok, Data}),
     {ok, State};
 
@@ -620,23 +621,24 @@ conn_stop(Reason, _NkPort, #state{trans=Trans}=State) ->
 process_client_req(Cmd, Data, TId, NkPort, #state{user_id=UserId}=State) ->
     Req = make_req(Cmd, Data, TId, State),
     case nkservice_api:api(Req) of
-        {ok, Reply, #nkreq{user_id=UserId2, user_state=UserState, unknown_fields=Unknown}} ->
+        {ok, Reply, #nkreq{user_id=UserId2, unknown_fields=Unknown}=Req2} ->
             case UserId == <<>> andalso UserId2 /= <<>> of
                 true ->
-                    State2 = State#state{user_id=UserId, user_state=UserState},
-                    process_login(Reply, TId, Unknown, NkPort, State2);
+                    State2 = State#state{user_id=UserId},
+                    State3 = update_req_state(Req2, State2),
+                    process_login(Reply, TId, Unknown, NkPort, State3);
                 false when UserId /= UserId2 ->
                     send_reply_error(invalid_login_request, TId, NkPort, State);
                 false ->
-                    State2 = State#state{user_state=UserState},
+                    State2 = update_req_state(Req2, State),
                     send_reply_ok(Reply, TId, Unknown, NkPort, State2)
             end;
-        {ack, Pid, #nkreq{user_state=UserState, unknown_fields=Unknown}} ->
-            State2 = State#state{user_state=UserState},
+        {ack, Pid, #nkreq{unknown_fields=Unknown}=Req2} ->
+            State2 = update_req_state(Req2, State),
             State3 = insert_ack(TId, Pid, State2),
             send_ack(TId, Unknown, NkPort, State3);
-        {error, Error, #nkreq{user_state=UserState}} ->
-            State2 = State#state{user_state=UserState},
+        {error, Error, Req2} ->
+            State2 = update_req_state(Req2, State),
             send_reply_error(Error, TId, NkPort, State2)
     end.
 
@@ -698,6 +700,7 @@ make_req(Cmd, Data, TId, State) ->
         session_id = SessId,
         user_id = UserId,
         user_state = UserState,
+        session_manager = Manager,
         local = Local,
         remote = Remote
     } = State,
@@ -707,6 +710,7 @@ make_req(Cmd, Data, TId, State) ->
         session_id = SessId,
         session_pid = self(),
         session_meta = #{local=>Local, remote=>Remote},
+        session_manager = Manager,
         tid = TId,
         cmd = Cmd,
         data = Data,
@@ -715,6 +719,11 @@ make_req(Cmd, Data, TId, State) ->
         timeout_pending = true,
         debug = get(nkapi_server_debug)
     }.
+
+
+%% @private
+update_req_state(#nkreq{session_manager=Manager, user_state=UserState}, State) ->
+    State#state{session_manager=Manager, user_state=UserState}.
 
 
 %% @private

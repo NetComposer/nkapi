@@ -82,8 +82,8 @@ cmd(<<"event/unsubscribe">>, #nkreq{data=Data}=Req) ->
 
 cmd(<<"event/get_subscriptions">>, Req) ->
     case nkservice_session:get_subscriptions(Req) of
-        ok ->
-            {ok, #{}};
+        {ok, List} ->
+            {ok, List};
         {error, Error} ->
             {error, Error}
     end;
