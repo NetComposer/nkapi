@@ -134,7 +134,7 @@ cmd(<<"session/cmd">>, Req) ->
     Pid = spawn(
         fun() ->
             Reply = cmd(<<"session/cmd">>, Req2),
-            nkservice_session:reply(Reply)
+            nkservice_api:reply(Reply)
         end),
     {ack, Pid};
 
@@ -156,7 +156,7 @@ cmd(<<"session/api_test.async">>, #nkreq{data=#{data:=Data}}=Req) ->
     Pid = spawn_link(
         fun() ->
             timer:sleep(2000),
-            nkservice_session:reply({ok, #{reply=>Data}, Req})
+            nkservice_api:reply({ok, #{reply=>Data}, Req})
         end),
     {ack, Pid};
 
