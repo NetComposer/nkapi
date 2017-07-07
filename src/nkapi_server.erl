@@ -427,8 +427,8 @@ conn_handle_cast({nkapi_send_event2, Event}, NkPort, State) ->
     send(Msg, NkPort, State);
 
 conn_handle_cast({nkapi_reply_ok, Reply, Req}, NkPort, #state{user_id=UserId}=State) ->
-    #nkreq{tid=TId, user_state=UserState, user_id=UserId2, unknown_fields=Unknown} = Req,
-    State2 = State#state{user_state=UserState},
+    #nkreq{tid=TId, user_id=UserId2, unknown_fields=Unknown} = Req,
+    State2 = update_req_state(Req, State),
     case extract_op(TId, State2) of
         {#trans{op=ack}, State3} ->
             case UserId == <<>> andalso UserId2 /= <<>> of
@@ -663,7 +663,7 @@ process_client_resp(Result, Data, #trans{from=From}, _NkPort, State) ->
 %% @private
 process_server_event(Event, NkPort, State) ->
     Req = make_req(<<"event">>, nkevent_util:unparse(Event), <<>>, State),
-    case nkservice_api:event(Req) of
+    case nkservice_api:event(Req#nkreq{timeout_pending=false}) of
         ok ->
             {ok, State};
         {forward, #nkreq{data=Data2}} ->
