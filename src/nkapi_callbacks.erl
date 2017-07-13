@@ -149,7 +149,9 @@ api_server_terminate(_Reason, State) ->
 
 %% @doc called when a new http request has been received to select te authenticated user
 -spec api_server_http_auth(#nkreq{}, nkapi_server_http:http_req()) ->
-    {true, User::binary(), Meta::map(), Session::map()} |
+    {true, User::binary()} |
+    {true, User::binary, #nkreq{}} |
+    {true, User::binary, #nkreq{}, State::map()} |
     false |
     {error, nkservice:error()}.
 

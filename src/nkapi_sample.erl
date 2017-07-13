@@ -341,7 +341,7 @@ service_api_cmd(_Req) ->
 api_server_http_auth(Req, State) ->
     case nkapi_server_http:get_basic_auth(Req) of
         {basic, User, <<"1234">>} ->
-            {true, User, #{data=>http}, State};
+            {true, User, Req#nkreq{user_state=#{data=>http}}, State};
         _ ->
             continue
     end.

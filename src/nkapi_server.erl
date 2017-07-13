@@ -647,9 +647,9 @@ process_client_req(Cmd, Data, TId, NkPort, #state{user_id=UserId}=State) ->
 process_client_event(Data, State) ->
     Req = make_req(<<"event">>, Data, <<>>, State),
     case nkservice_api:api(Req) of
-        ok ->
+        {ok, _, _} ->
             {ok, State};
-        {error, _Error} ->
+        {error, _Error, _} ->
             {ok, State}
     end.
 

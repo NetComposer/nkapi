@@ -209,13 +209,8 @@ init(HttpReq, [{srv_id, SrvId}]) ->
             timeout_pending = false
         },
         case process_auth(Req, HttpReq) of
-            {ok, Req2, UserState} ->
-                case Cmd of
-                    <<"event">> ->
-                        process_event(Req2, HttpReq, UserState);
-                    _ ->
-                        process_req(Req2, HttpReq, UserState)
-                end;
+            {ok, Req2} ->
+                process_req(Req2, HttpReq);
             {error, Error} ->
                 send_msg_error(Error, Req, HttpReq)
         end
@@ -237,11 +232,11 @@ terminate(_Reason, _Req, _Opts) ->
 process_auth(#nkreq{srv_id=SrvId}=Req, HttpReq) ->
     case SrvId:api_server_http_auth(Req, HttpReq) of
         {true, UserId} ->
-            {ok, Req#nkreq{user_id=UserId}, #{}};
-        {true, UserId, #nkreq{}=Req2} ->
-            {ok, Req2#nkreq{user_id=UserId}, #{}};
-        {true, UserId, #nkreq{}=Req2, State} ->
-            {ok, Req2#nkreq{user_id=UserId}, State};
+            {ok, Req#nkreq{user_id=UserId}};
+        {true, UserId, UserState} ->
+            {ok, Req#nkreq{user_id=UserId, user_state=UserState}};
+        {true, UserId, UserState, #nkreq{}=Req2} ->
+            {ok, Req2#nkreq{user_id=UserId, user_state=UserState}};
         false ->
             throw({403, [], <<"User forbidden">>});
         {error, Error} ->
@@ -250,11 +245,11 @@ process_auth(#nkreq{srv_id=SrvId}=Req, HttpReq) ->
 
 
 %% @private
-process_req(Req, HttpReq, UserState) ->
-    case nkservice_api:api(Req, UserState) of
-        {ok, Reply, #nkreq{unknown_fields=Unknown}, _UserState} ->
+process_req(Req, HttpReq) ->
+    case nkservice_api:api(Req) of
+        {ok, Reply, #nkreq{unknown_fields=Unknown}} ->
             send_msg_ok(Reply, Unknown, HttpReq);
-        {ack, Pid, #nkreq{}=Req, _UserState2} ->
+        {ack, Pid, #nkreq{}=Req} ->
             Mon = case is_pid(Pid) of
                 true ->
                     monitor(process, Pid);
@@ -262,15 +257,6 @@ process_req(Req, HttpReq, UserState) ->
                     undefined
             end,
             wait_ack(Mon, Req, HttpReq);
-        {error, Error, _UserState2} ->
-            send_msg_error(Error, Req, HttpReq)
-    end.
-
-%% @private
-process_event(Req, HttpReq, UserState) ->
-    case nkservice_api:event(Req, UserState) of
-        {ok, _UserState2} ->
-            send_msg_ok(#{}, [], HttpReq);
         {error, Error, _UserState2} ->
             send_msg_error(Error, Req, HttpReq)
     end.
