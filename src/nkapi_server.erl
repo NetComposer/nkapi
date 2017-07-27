@@ -303,7 +303,7 @@ default_port(https) -> 9011.
     {ok, #state{}}.
 
 conn_init(NkPort) ->
-    {ok, {nkapi_server, SrvId}, _} = nkpacket:get_user(NkPort),
+    {ok, {nkapi_server, Manager, SrvId}, _} = nkpacket:get_user(NkPort),
     {ok, Local} = nkpacket:get_local_bin(NkPort),
     {ok, Remote} = nkpacket:get_remote_bin(NkPort),
     SessId = <<"session-", (nklib_util:luid())/binary>>,
@@ -311,6 +311,7 @@ conn_init(NkPort) ->
     State1 = #state{
         srv_id = SrvId,
         session_id = SessId,
+        session_manager = Manager,
         local = Local,
         remote = Remote,
         links = nklib_links:new(),

@@ -57,7 +57,7 @@ plugin_deps() ->
 
 plugin_syntax() ->
     nkpacket_util:get_plugin_net_syntax(#{
-        api_server => fun nkapi_util:parse_api_server/3,
+        api_server => fun nkapi_util:parse_api_server/1,
         api_server_timeout => {integer, 5, none}
     }).
 

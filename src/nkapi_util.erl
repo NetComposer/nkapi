@@ -23,7 +23,7 @@
 
 -export([http/3, http_upload/7, http_download/6]).
 -export([get_api_webs/3, get_api_sockets/3]).
--export([parse_api_server/3]).
+-export([parse_api_server/1]).
 
 -include_lib("nkpacket/include/nkpacket.hrl").
 -include_lib("nklib/include/nklib.hrl").
@@ -192,9 +192,10 @@ get_api_sockets(SrvId, [{List, Opts}|Rest], Config, Acc) ->
         _ ->
             false
     end,
+    Manager = maps:get(manager, Config, undefined),
     Opts2 = NetOpts#{
         path => maps:get(path, Opts, <<"/">>),
-        class => {nkapi_server, SrvId},
+        class => {nkapi_server, Manager, SrvId},
         get_headers => [<<"user-agent">>],
         idle_timeout => 1000 * Timeout,
         debug => PacketDebug
@@ -212,10 +213,10 @@ to_bin(Term) -> nklib_util:to_binary(Term).
 %% ===================================================================
 
 %% @private
-parse_api_server(api_server, {nkapi_parsed, Multi}, _Ctx) ->
+parse_api_server({nkapi_parsed, Multi}) ->
     {ok, {nkapi_parsed, Multi}};
 
-parse_api_server(api_server, Url, _Ctx) ->
+parse_api_server(Url) ->
     case nklib_parse:uris(Url) of
         error ->
             error;
