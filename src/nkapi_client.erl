@@ -74,12 +74,11 @@
 -spec start(term(), binary(), map(), function(), term()) ->
     {ok, pid(), Reply::map()} | {error, term()}.
 
-start(Srv, Url, Login, Fun, UserData) ->
-    start(Srv, Url, Login, Fun, UserData, <<"login">>).
+start(SrvId, Url, Login, Fun, UserData) ->
+    start(SrvId, Url, Login, Fun, UserData, <<"login">>).
 
     
-start(Srv, Url, Login, Fun, UserData, Cmd) ->
-    {ok, SrvId} = nkservice_srv:get_srv_id(Srv),
+start(SrvId, Url, Login, Fun, UserData, Cmd) ->
     Debug = case nkservice_util:get_debug_info(SrvId, ?MODULE) of
         {true, #{nkpacket:=true}} -> true;
         _ -> false
