@@ -258,11 +258,7 @@ process_req(Req, HttpReq) ->
             end,
             wait_ack(Mon, Req, HttpReq);
         {error, Error, _UserState2} ->
-            send_msg_error(Error, Req, HttpReq);
-        Other ->
-            lager:error("NKLOG OTGER ~p", [Other]),
-            error(Other)
-
+            send_msg_error(Error, Req, HttpReq)
     end.
 
 
