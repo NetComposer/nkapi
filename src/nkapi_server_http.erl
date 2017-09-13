@@ -249,7 +249,7 @@ process_req(Req, HttpReq) ->
     case nkservice_api:api(Req) of
         {ok, Reply, #nkreq{unknown_fields=Unknown}} ->
             send_msg_ok(Reply, Unknown, HttpReq);
-        {ack, Pid, #nkreq{}=Req} ->
+        {ack, Pid, #nkreq{}} ->
             Mon = case is_pid(Pid) of
                 true ->
                     monitor(process, Pid);
@@ -258,7 +258,11 @@ process_req(Req, HttpReq) ->
             end,
             wait_ack(Mon, Req, HttpReq);
         {error, Error, _UserState2} ->
-            send_msg_error(Error, Req, HttpReq)
+            send_msg_error(Error, Req, HttpReq);
+        Other ->
+            lager:error("NKLOG OTGER ~p", [Other]),
+            error(Other)
+
     end.
 
 
