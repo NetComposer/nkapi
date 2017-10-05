@@ -48,11 +48,13 @@
     lager:Type(
         [
             {session_id, State#state.session_id},
+            {srv_id, State#state.srv_id},
             {user_id, State#state.user_id}
         ],
-        "NkAPI API Server ~s (~s) "++Txt, 
+        "NkAPI API Server ~s (~s, ~s) "++Txt,
         [
             State#state.session_id,
+            State#state.srv_id,
             State#state.user_id
             | Args
         ])).
