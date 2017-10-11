@@ -487,31 +487,31 @@ conn_handle_cast({nkapi_start_ping, Time}, _NkPort, #state{ping=Ping}=State) ->
 conn_handle_cast(nkapi_stop_ping, _NkPort, State) ->
     {ok, State#state{ping=undefined}};
 
-conn_handle_cast({nkapi_subscribe, Event}, _NkPort, #state{srv_id=SrvId}=State) ->
+conn_handle_cast({nkapi_subscribe, Event}, _NkPort, #state{srv_id=_SrvId}=State) ->
     #state{regs=Regs} = State,
-    Event2 = Event#nkevent{srv_id=SrvId},
-    {ok, [Pid]} = nkevent:reg(Event2),
-    Index = event_index(Event2),
+    %_Event2 = Event#nkevent{srv_id=SrvId},
+    {ok, [Pid]} = nkevent:reg(Event),
+    Index = event_index(Event),
     Regs2 = case lists:keyfind(Index, #reg.index, Regs) of
         false ->
-            ?DEBUG("registered event ~p", [Event2], State),
+            ?DEBUG("registered event ~p", [Event], State),
             Mon = monitor(process, Pid),
-            [#reg{index=Index, event=Event2, mon=Mon}|Regs];
+            [#reg{index=Index, event=Event, mon=Mon}|Regs];
         #reg{} ->
-            ?DEBUG("event ~p already registered", [Event2], State),
+            ?DEBUG("event ~p already registered", [Event], State),
             Regs
     end,
     {ok, State#state{regs=Regs2}};
 
-conn_handle_cast({nkapi_unsubscribe, Event}, _NkPort, #state{srv_id=SrvId}=State) ->
+conn_handle_cast({nkapi_unsubscribe, Event}, _NkPort, #state{srv_id=_SrvId}=State) ->
     #state{regs=Regs} = State,
-    Event2 = Event#nkevent{srv_id=SrvId},
-    Index = event_index(Event2),
+    %_Event2 = Event#nkevent{srv_id=SrvId},
+    Index = event_index(Event),
     case lists:keytake(Index, #reg.index, Regs) of
         {value, #reg{mon=Mon}, Regs2} ->
             demonitor(Mon),
-            ok = nkevent:unreg(Event2),
-            ?DEBUG("unregistered event ~p", [Event2], State),
+            ok = nkevent:unreg(Event),
+            ?DEBUG("unregistered event ~p", [Event], State),
             {ok, State#state{regs=Regs2}};
         false ->
             {ok, State}
@@ -553,6 +553,7 @@ conn_handle_info(nkapi_send_ping, NkPort, #state{ping=Time}=State) ->
 
 %% We receive an event we are subscribed to.
 conn_handle_info({nkevent, Event}, NkPort, State) ->
+    lager:warning("NKLOG API EVN ~p", [Event]),
     process_server_event(Event, NkPort, State);
 
 conn_handle_info({timeout, _, {nkapi_op_timeout, TId}}, _NkPort, State) ->
