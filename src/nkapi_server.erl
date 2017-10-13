@@ -553,7 +553,6 @@ conn_handle_info(nkapi_send_ping, NkPort, #state{ping=Time}=State) ->
 
 %% We receive an event we are subscribed to.
 conn_handle_info({nkevent, Event}, NkPort, State) ->
-    lager:warning("NKLOG API EVN ~p", [Event]),
     process_server_event(Event, NkPort, State);
 
 conn_handle_info({timeout, _, {nkapi_op_timeout, TId}}, _NkPort, State) ->
