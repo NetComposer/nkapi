@@ -60,7 +60,7 @@ start(Type) ->
 %% @private OTP standard start callback
 start(_Type, _Args) ->
     nkpacket:register_protocol(nkapi, nkapi_server),
-    nkpacket:register_protocol(nkapi_c, nkapi_client),
+    %nkpacket:register_protocol(nkapi_c, nkapi_client),
     Syntax = #{
         api_ping_timeout => {integer, 5, none},
         api_cmd_timeout => {integer, 5, none},

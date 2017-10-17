@@ -65,7 +65,7 @@ plugin_syntax() ->
 %% @doc This function, if implemented, allows to add listening transports.
 %% By default start the web_server and api_server transports.
 -spec plugin_listen(config(), nkservice:service()) ->
-	[{nkpacket:user_connection(), nkpacket:listener_opts()}].
+	[{nkpacket:user_connection(), nkpacket:listen_opts()}].
 
 plugin_listen(Config, #{id:=SrvId}=Srv) ->
     {nkapi_parsed, ApiSrv} = maps:get(api_server, Config, {nkapi_parsed, []}),
