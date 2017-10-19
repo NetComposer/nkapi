@@ -269,8 +269,8 @@ find_session(SessId) ->
 
 -record(state, {
     srv_id :: nkservice:id(),
+    api_id :: nkapi:id(),
     session_id :: nkservice:session_id(),
-    session_manager = undefined :: term(),
     trans = #{} :: #{tid() => #trans{}},
     tid = 1 :: integer(),
     ping :: integer() | undefined,
@@ -288,15 +288,13 @@ find_session(SessId) ->
 -spec transports(nklib:scheme()) ->
     [nkpacket:transport()].
 
-transports(_) -> [wss, tls, ws, tcp, http, https].
+transports(_) -> [wss, ws, https, http].
 
 -spec default_port(nkpacket:transport()) ->
     inet:port_number() | invalid.
 
 default_port(ws) -> 9010;
 default_port(wss) -> 9011;
-default_port(tcp) -> 9010;
-default_port(tls) -> 9011;
 default_port(http) -> 9010;
 default_port(https) -> 9011.
 
@@ -305,15 +303,15 @@ default_port(https) -> 9011.
     {ok, #state{}}.
 
 conn_init(NkPort) ->
-    {ok, {nkapi_server, Manager, SrvId}, _} = nkpacket:get_user(NkPort),
+    {ok, {nkapi_server, SrvId, ApiId}, _} = nkpacket:get_user(NkPort),
     {ok, Local} = nkpacket:get_local_bin(NkPort),
     {ok, Remote} = nkpacket:get_remote_bin(NkPort),
     SessId = <<"session-", (nklib_util:luid())/binary>>,
     true = nklib_proc:reg({?MODULE, session, SessId}, <<>>),
     State1 = #state{
         srv_id = SrvId,
+        api_id = ApiId,
         session_id = SessId,
-        session_manager = Manager,
         local = Local,
         remote = Remote,
         links = nklib_links:new(),
@@ -627,7 +625,7 @@ process_client_req(Cmd, Data, TId, NkPort, #state{user_id=UserId}=State) ->
         {ok, Reply, #nkreq{user_id=UserId2, unknown_fields=Unknown}=Req2} ->
             case UserId == <<>> andalso UserId2 /= <<>> of
                 true ->
-                    State2 = State#state{user_id=UserId},
+                    State2 = State#state{user_id=UserId2},
                     State3 = update_req_state(Req2, State2),
                     process_login(Reply, TId, Unknown, NkPort, State3);
                 false when UserId /= UserId2 ->
@@ -700,20 +698,20 @@ get_cmd(Cmd, Msg) ->
 make_req(Cmd, Data, TId, State) ->
     #state{
         srv_id = SrvId,
+        api_id = ApiId,
         session_id = SessId,
         user_id = UserId,
         user_state = UserState,
-        session_manager = Manager,
         local = Local,
         remote = Remote
     } = State,
     #nkreq{
         srv_id = SrvId,
+        api_id = ApiId,
         session_module = ?MODULE,
         session_id = SessId,
         session_pid = self(),
         session_meta = #{local=>Local, remote=>Remote},
-        session_manager = Manager,
         tid = TId,
         cmd = Cmd,
         data = Data,
@@ -725,8 +723,8 @@ make_req(Cmd, Data, TId, State) ->
 
 
 %% @private
-update_req_state(#nkreq{session_manager=Manager, user_state=UserState}, State) ->
-    State#state{session_manager=Manager, user_state=UserState}.
+update_req_state(#nkreq{user_state=UserState}, State) ->
+    State#state{user_state=UserState}.
 
 
 %% @private
@@ -936,8 +934,8 @@ send(Msg, NkPort) ->
 
 
 %% @private
-handle(Fun, Args, State) ->
-    nklib_gen_server:handle_any(Fun, Args, State, #state.srv_id, #state.user_state).
+handle(Fun, Args, #state{api_id=Id}=State) ->
+    nklib_gen_server:handle_any(Fun, [Id|Args], State, #state.srv_id, #state.user_state).
 
 
 %% @private

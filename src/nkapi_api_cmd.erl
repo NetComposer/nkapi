@@ -81,12 +81,12 @@ cmd(<<"event/unsubscribe">>, #nkreq{data=Data}=Req) ->
     end;
 
 cmd(<<"event/get_subscriptions">>, Req) ->
-    case nkservice_session:get_subscriptions(Req) of
-        {ok, List} ->
-            {ok, List};
-        {error, Error} ->
-            {error, Error}
-    end;
+    Pid = spawn_link(
+        fun() ->
+            {ok, List} = nkservice_session:get_subscriptions(Req),
+            nkservice_api:reply({ok, List, Req})
+        end),
+    {ack, Pid};
 
 cmd(<<"event/send">>, #nkreq{data=Data}=Req) ->
     case nkservice_session:send_event(Req, Data) of

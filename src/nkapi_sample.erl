@@ -37,16 +37,15 @@
 
 %% @doc Starts the service
 start() ->
+    Timeout = 60*60*1000,
     Spec = #{
         callback => ?MODULE,
-        api_server => "wss:all:9010/_api/ws, https://all:9010/_api",
-        api_server_timeout => 300,
-        %debug => [nkapi_client, {nkapi_server, [nkpacket]}, nkevent],
-        %plugins => [nkapi_log_gelf],
-        %api_gelf_server => "c2.netc.io",
-        % To test nkpacket config:
-        tls_password => <<"1234">>,
-        packet_no_dns_cache => false
+        nkapi => #{
+            id => test1,
+            url => "wss:all:9010/_api/ws, https://all:9010/_api",
+            opts => #{idle_timeout => Timeout, debug=>true, tls_password => <<"1234">>, no_dns_cache=>true}
+        },
+        debug => [nkapi_server]
     },
     nkservice:start(?SRV, Spec).
 
@@ -63,7 +62,8 @@ login(User) ->
         password=> <<"1234">>,
         meta => #{a=>User}
     },
-    {ok, _Reply, _Pid} = nkapi_client:start(?SRV, ?WS, Login, Fun, #{}, nkapi_test_login).
+    {ok, #{<<"login">>:=<<"ok">>}, _Pid} = nkapi_client:start(?SRV, ?WS, Login, Fun, #{}, nkapi_test_login).
+
 
 
 %% @doc Gets all registered users and sessions
@@ -175,7 +175,8 @@ log(Source, Msg, Data) ->
 
 
 http_ping() ->
-    http_cmd(session, <<>>, ping, #{a=>1}).
+    http_cmd(<<"session/ping">>, #{a=>1}).
+
 
 http_test_async() ->
     {ok,
@@ -185,7 +186,7 @@ http_test_async() ->
                 <<"reply">> := #{<<"a">> := 1}}
         }
     } =
-        http_cmd(session, <<>>, api_test_async, #{data=>#{a=>1}}).
+        http_cmd(<<"session/api_test.async">>, #{data=>#{a=>1}}).
 
 
 http_session_call(SessId) ->
@@ -195,8 +196,7 @@ http_session_call(SessId) ->
             <<"data">> := #{<<"k">> := <<"v">>}
         }
     } =
-        http_cmd(session, <<>>, cmd,
-            #{session_id=>SessId, class=>class1, cmd=>cmd1, data=>#{k=>v}}),
+        http_cmd(<<"session/cmd">>, #{session_id=>SessId, class=>class1, cmd=>cmd1, data=>#{k=>v}}),
     {ok,
         #{
             <<"result">> := <<"error">>,
@@ -206,35 +206,13 @@ http_session_call(SessId) ->
             }
         }
     } =
-        http_cmd(session, <<>>, cmd,
-            #{session_id=>SessId, class=>class2, cmd=>cmd1, data=>#{k=>v}}),
+        http_cmd(<<"session/cmd">>, #{session_id=>SessId, class=>class2, cmd=>cmd1, data=>#{k=>v}}),
     ok.
 
 %% @doc
 http_log(Source, Msg, Data) ->
-    http_cmd(session, <<>>, log, Data#{source=>Source, message=>Msg}).
+    http_cmd(<<"session/log">>, Data#{source=>Source, message=>Msg}).
 
-
-upload(File) ->
-    {ok, Bin} = file:read_file(File),
-    nkservice_util:http_upload(
-        "https://127.0.0.1:9010/rpc",
-        u1,
-        p1,
-        test,
-        my_obj_id,
-        File,
-        Bin).
-
-
-download(File) ->
-    nkservice_util:http_download(
-        "https://127.0.0.1:9010/rpc",
-        u1,
-        p1,
-        test,
-        my_obj_id,
-        File).
 
 
 get_client() ->
@@ -261,23 +239,22 @@ event(Pid, Data) ->
 
 
 
-http_cmd(Class, Sub, Cmd, Data) ->
-    Opts = #{
-        user => <<"user1">>,
-        pass => <<"1234">>,
-        body => #{
-            class => Class,
-            subclass => Sub,
-            cmd => Cmd,
-            data => Data
-        }
-    },
-    case nkapi_util:http(post, ?HTTP, Opts) of
-        {ok, _Hds, Json, _Time} ->
-            {ok, nklib_json:decode(Json)};
+http_cmd(Cmd, Data) ->
+    Auth = base64:encode(list_to_binary(["user1", ":", "1234"])),
+    Hds = [{"Authorization", "Basic "++binary_to_list(Auth)}],
+    Body = nklib_json:encode_pretty(#{
+        cmd => Cmd,
+        data => Data
+    }),
+    case httpc:request(post, {?HTTP, Hds, "application/json", Body}, [], []) of
+        {ok, {{_, 200, _}, _Hs, Res}} ->
+            {ok, nklib_json:decode(Res)};
         {error, Error} ->
             {error, Error}
     end.
+
+
+
 
 
 
@@ -311,37 +288,37 @@ plugin_deps() ->
 
 
 %% @doc
-service_api_syntax(Syntax, #nkreq{cmd = <<"nkapi_test_login">>}=Req) ->
+service_api_syntax(_Id, Syntax, #nkreq{cmd = <<"nkapi_test_login">>}=Req) ->
     {Syntax#{user=>binary, password=>binary, meta=>map}, Req};
 
-service_api_syntax(_Syntax, _Req) ->
+service_api_syntax(_Id, _Syntax, _Req) ->
     continue.
 
 
 %% @doc
-service_api_allow(_Req, State) ->
-    {true, State}.
+service_api_allow(_Id, Req) ->
+    {true, Req}.
 
 
 %% @doc Called on any command
-service_api_cmd(#nkreq{cmd = <<"nkapi_test_login">>, session_id=SessId, data=Data}) ->
+service_api_cmd(_Id, #nkreq{cmd = <<"nkapi_test_login">>, session_id=SessId, data=Data, user_state=State}=Req) ->
     case Data of
         #{user:=User, password:=<<"1234">>} ->
             Meta = maps:get(meta, Data, #{}),
-            {login, #{login=>ok, sess=>SessId}, User, Meta};
+            {ok, #{login=>ok, sess=>SessId}, Req#nkreq{user_id=User, user_state=State#{meta=>Meta}}};
         _ ->
             {error, invalid_user}
     end;
 
-service_api_cmd(_Req) ->
+service_api_cmd(_Id, _Req) ->
     continue.
 
 
 %% @doc
-api_server_http_auth(Req, State) ->
-    case nkapi_server_http:get_basic_auth(Req) of
+api_server_http_auth(_Id, HttpReq, Req) ->
+    case nkapi_server_http:get_basic_auth(HttpReq) of
         {basic, User, <<"1234">>} ->
-            {true, User, Req#nkreq{user_state=#{data=>http}}, State};
+            {true, User, Req#nkreq{user_state=#{data=>http}}, Req};
         _ ->
             continue
     end.

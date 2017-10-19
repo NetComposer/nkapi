@@ -175,7 +175,7 @@ reply(Pid, {ack, AckPid, #nkreq{session_module=?MODULE, tid=TId}}) ->
 
 
 %% @private
-init(HttpReq, [{srv_id, SrvId}]) ->
+init(HttpReq, [{srv_id, SrvId}, {id, Id}]) ->
     {Ip, Port} = cowboy_req:peer(HttpReq),
     Remote = <<
         (nklib_util:to_host(Ip))/binary, ":",
@@ -198,6 +198,7 @@ init(HttpReq, [{srv_id, SrvId}]) ->
         SessionId = nklib_util:luid(),
         Req = #nkreq{
             srv_id = SrvId,
+            api_id = Id,
             session_module = ?MODULE,
             session_id = SessionId,
             session_pid = self(),
@@ -208,9 +209,9 @@ init(HttpReq, [{srv_id, SrvId}]) ->
             data = Data,
             timeout_pending = false
         },
-        case process_auth(Req, HttpReq) of
+        case process_auth(HttpReq, Req) of
             {ok, Req2} ->
-                process_req(Req2, HttpReq);
+                process_req(HttpReq, Req2);
             {error, Error} ->
                 send_msg_error(Error, Req, HttpReq)
         end
@@ -229,8 +230,8 @@ terminate(_Reason, _Req, _Opts) ->
 %% ===================================================================
 
 %% @private
-process_auth(#nkreq{srv_id=SrvId}=Req, HttpReq) ->
-    case SrvId:api_server_http_auth(Req, HttpReq) of
+process_auth(HttpReq, #nkreq{srv_id=SrvId, api_id=Id}=Req) ->
+    case ?CALL_SRV(SrvId, api_server_http_auth, [Id, HttpReq, Req]) of
         {true, UserId} ->
             {ok, Req#nkreq{user_id=UserId}};
         {true, UserId, UserState} ->
@@ -245,7 +246,7 @@ process_auth(#nkreq{srv_id=SrvId}=Req, HttpReq) ->
 
 
 %% @private
-process_req(Req, HttpReq) ->
+process_req(HttpReq, Req) ->
     case nkservice_api:api(Req) of
         {ok, Reply, #nkreq{unknown_fields=Unknown}} ->
             send_msg_ok(Reply, Unknown, HttpReq);
@@ -284,29 +285,6 @@ get_body(Req) ->
         _ ->
             throw({[], <<"Body too large">>})
     end.
-
-
-%%%% @private
-%%auth(#state{user_state=#{remote:=Remote}=UserState} = State) ->
-%%    case handle(api_server_http_auth, [], State) of
-%%        {true, User, Meta, State2} when is_map(Meta) ->
-%%            User2 = to_bin(User),
-%%            #state{user_state=UserState} = State,
-%%            UserState2 = UserState#{user=>User2, user_meta=>Meta},
-%%            State3 = State2#state{user=User2, user_state=UserState2},
-%%            ?LLOG(info, "user authenticated (~s)", [Remote], State3),
-%%            State3;
-%%        {token, User, Meta, Token, State2} ->
-%%            User2 = to_bin(User),
-%%            #state{user_state=UserState} = State,
-%%            UserState2 = UserState#{user=>User2, user_meta=>Meta},
-%%            State3 = State2#state{user=User2, user_token=Token, user_state=UserState2},
-%%            ?LLOG(info, "user authenticated (~s)", [Remote], State3),
-%%            State3;
-%%        {false, _State2} ->
-%%            ?LLOG(info, "user forbidden (~s)", [Remote], State),
-%%            throw({403, [], <<"Forbidden">>})
-%%    end.
 
 
 %% @private

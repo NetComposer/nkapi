@@ -90,10 +90,8 @@ start(SrvId, Url, Login, Fun, UserData, Cmd) ->
         connect_timeout => 60000,
         idle_timeout => ?WS_TIMEOUT,
         user => {Fun, UserData},
-        %implicit_scheme => nkapi_c,
         debug => Debug
     },
-    lager:error("NKLOG CONN ~p", [a]),
     case nkpacket:connect(Url, ConnOpts) of
         {ok, Pid} -> 
             case cmd(Pid, Cmd, Login) of

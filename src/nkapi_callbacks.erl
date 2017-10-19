@@ -22,12 +22,12 @@
 -module(nkapi_callbacks).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 -export([plugin_deps/0, plugin_syntax/0, plugin_listen/2]).
--export([api_server_init/2, api_server_terminate/2,
-		 api_server_reg_down/3,
-		 api_server_handle_call/3, api_server_handle_cast/2, 
-		 api_server_handle_info/2, api_server_code_change/3]).
--export([api_server_http_auth/2]).
--export([service_api_syntax/2,service_api_cmd/1]).
+-export([api_server_init/3, api_server_terminate/3,
+		 api_server_reg_down/4,
+		 api_server_handle_call/4, api_server_handle_cast/3,
+		 api_server_handle_info/3, api_server_code_change/4]).
+-export([api_server_http_auth/3]).
+-export([service_api_syntax/3,  service_api_cmd/2]).
 -export_type([continue/0]).
 
 -type continue() :: continue | {continue, list()}.
@@ -56,10 +56,16 @@ plugin_deps() ->
 	nklib_config:syntax().
 
 plugin_syntax() ->
-    nkpacket_util:get_plugin_net_syntax(#{
-        api_server => fun nkapi_util:parse_api_server/1,
-        api_server_timeout => {integer, 5, none}
-    }).
+    #{
+        nkapi => {list,
+        #{
+            id => binary,
+            url => fun nkapi_util:parse_url/1,
+            opts => nkpacket_syntax:safe_syntax(),
+            '__mandatory' => [id, url]
+        }}
+}.
+
 
 
 %% @doc This function, if implemented, allows to add listening transports.
@@ -67,12 +73,10 @@ plugin_syntax() ->
 -spec plugin_listen(config(), nkservice:service()) ->
 	[{nkpacket:user_connection(), nkpacket:listen_opts()}].
 
-plugin_listen(Config, #{id:=SrvId}=Srv) ->
-    {nkapi_parsed, ApiSrv} = maps:get(api_server, Config, {nkapi_parsed, []}),
-    Debug = nklib_util:get_value(nkapi_server, maps:get(debug, Srv, [])),
-    ApiSrvs1 = nkapi_util:get_api_webs(SrvId, ApiSrv, Config#{debug=>Debug}),
-    ApiSrvs2 = nkapi_util:get_api_sockets(SrvId, ApiSrv, Config#{debug=>Debug}),
-    ApiSrvs1 ++ ApiSrvs2.
+plugin_listen(Config, #{id:=SrvId}) ->
+    Endpoints = maps:get(nkapi, Config, []),
+    Listen = nkapi_util:make_listen(SrvId, Endpoints),
+    lists:flatten(maps:values(Listen)).
 
 
 
@@ -89,73 +93,73 @@ plugin_listen(Config, #{id:=SrvId}=Srv) ->
 
 
 %% @doc Called when a new connection starts
--spec api_server_init(nkpacket:nkport(), state()) ->
+-spec api_server_init(nkapi:id(), nkpacket:nkport(), state()) ->
 	{ok, state()} | {stop, term()}.
 
-api_server_init(_NkPort, State) ->
+api_server_init(_Id, _NkPort, State) ->
 	{ok, State}.
 
 
 %% @doc Called when the service process receives a registered process down
--spec api_server_reg_down(nklib:link(), Reason::term(), state()) ->
+-spec api_server_reg_down(nkapi:id(), nklib:link(), Reason::term(), state()) ->
 	{ok, state()} | {stop, Reason::term(), state()} | continue().
 
-api_server_reg_down(_Link, _Reason, State) ->
+api_server_reg_down(_Id, _Link, _Reason, State) ->
     {ok, State}.
 
 
 %% @doc Called when the process receives a handle_call/3.
--spec api_server_handle_call(term(), {pid(), reference()}, state()) ->
+-spec api_server_handle_call(nkapi:id(), term(), {pid(), reference()}, state()) ->
 	{ok, state()} | continue().
 
-api_server_handle_call(Msg, _From, State) ->
+api_server_handle_call(_Id, Msg, _From, State) ->
     lager:error("Module nkapi_server received unexpected call ~p", [Msg]),
     {ok, State}.
 
 
 %% @doc Called when the process receives a handle_cast/3.
--spec api_server_handle_cast(term(), state()) ->
+-spec api_server_handle_cast(nkapi:id(), term(), state()) ->
 	{ok, state()} | continue().
 
-api_server_handle_cast(Msg, State) ->
+api_server_handle_cast(_Id, Msg, State) ->
     lager:error("Module nkapi_server received unexpected cast ~p", [Msg]),
 	{ok, State}.
 
 
 %% @doc Called when the process receives a handle_info/3.
--spec api_server_handle_info(term(), state()) ->
+-spec api_server_handle_info(nkapi:id(), term(), state()) ->
 	{ok, state()} | continue().
 
-api_server_handle_info(Msg, State) ->
+api_server_handle_info(_Id, Msg, State) ->
     lager:notice("Module nkapi_server received unexpected info ~p", [Msg]),
 	{ok, State}.
 
 
 %% @doc
--spec api_server_code_change(term()|{down, term()}, state(), term()) ->
+-spec api_server_code_change(nkapi:id(), term()|{down, term()}, state(), term()) ->
     ok | {ok, state()} | {error, term()} | continue().
 
-api_server_code_change(OldVsn, State, Extra) ->
+api_server_code_change(_Id, OldVsn, State, Extra) ->
 	{continue, [OldVsn, State, Extra]}.
 
 
 %% @doc Called when a service is stopped
--spec api_server_terminate(term(), state()) ->
+-spec api_server_terminate(nkapi:id(), term(), state()) ->
 	{ok, state()}.
 
-api_server_terminate(_Reason, State) ->
+api_server_terminate(_Id, _Reason, State) ->
 	{ok, State}.
 
 
 %% @doc called when a new http request has been received to select te authenticated user
--spec api_server_http_auth(#nkreq{}, nkapi_server_http:http_req()) ->
+-spec api_server_http_auth(nkapi:id(), nkapi_server_http:http_req(), #nkreq{}) ->
     {true, User::binary()} |
     {true, User::binary, #nkreq{}} |
     {true, User::binary, #nkreq{}, State::map()} |
     false |
     {error, nkservice:error()}.
 
-api_server_http_auth(_Req, _HttpReq) ->
+api_server_http_auth(_Id, _HttpReq, _Req) ->
     false.
 
 
@@ -168,16 +172,16 @@ api_server_http_auth(_Req, _HttpReq) ->
 
 
 %% @doc
-service_api_syntax(SyntaxAcc, #nkreq{session_module=nkapi_server, cmd=Cmd}=Req) ->
+service_api_syntax(_Id, SyntaxAcc, #nkreq{cmd=Cmd}=Req) ->
     {nkapi_api_syntax:syntax(Cmd, SyntaxAcc), Req};
 
-service_api_syntax(_SyntaxAcc, _Req) ->
+service_api_syntax(_Id, _SyntaxAcc, _Req) ->
     continue.
 
 
 %% @doc
-service_api_cmd(#nkreq{session_module=nkapi_server, cmd=Cmd}=Req) ->
+service_api_cmd(_Id, #nkreq{cmd=Cmd}=Req) ->
     nkapi_api_cmd:cmd(Cmd, Req);
 
-service_api_cmd(_Req) ->
+service_api_cmd(_Id, _Req) ->
     continue.
