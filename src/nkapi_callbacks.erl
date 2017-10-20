@@ -57,7 +57,7 @@ plugin_deps() ->
 
 plugin_syntax() ->
     #{
-        nkapi => {list,
+        nkapi_server => {list,
         #{
             id => binary,
             url => fun nkapi_util:parse_url/1,
@@ -74,7 +74,8 @@ plugin_syntax() ->
 	[{nkpacket:user_connection(), nkpacket:listen_opts()}].
 
 plugin_listen(Config, #{id:=SrvId}) ->
-    Endpoints = maps:get(nkapi, Config, []),
+    Endpoints = maps:get(nkapi_server, Config, []),
+    lager:notice("NKLOG API LISTEN ~p", [Endpoints]),
     Listen = nkapi_util:make_listen(SrvId, Endpoints),
     lists:flatten(maps:values(Listen)).
 
