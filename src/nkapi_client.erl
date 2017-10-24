@@ -89,7 +89,7 @@ start(SrvId, Url, Login, Fun, UserData, Cmd) ->
         monitor => self(),
         connect_timeout => 60000,
         idle_timeout => ?WS_TIMEOUT,
-        user => {Fun, UserData},
+        user_state => {Fun, UserData},
         debug => Debug
     },
     case nkpacket:connect(Url, ConnOpts) of
@@ -202,7 +202,8 @@ default_port(wss) -> 443.
 
 %% TODO: Send and receive pings from session when they are not in same cluster
 conn_init(NkPort) ->
-    {ok, {_, SrvId}, {CB, UserData}} = nkpacket:get_user(NkPort),
+    {ok, {?MODULE, SrvId}} = nkpacket:get_class(NkPort),
+    {ok, {CB, UserData}} = nkpacket:get_user_state(NkPort),
     {ok, Remote} = nkpacket:get_remote_bin(NkPort),
     State = #state{
         srv_id = SrvId,
