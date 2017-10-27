@@ -23,14 +23,6 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 -export([plugin_deps/0, plugin_syntax/0, plugin_listen/2]).
 
--type continue() :: continue | {continue, list()}.
--type config() :: nkapi:config().
-
-%%-include_lib("nkpacket/include/nkpacket.hrl").
-%%-include("nkapi.hrl").
-%%-include_lib("nkservice/include/nkservice.hrl").
-
-
 
 %% ===================================================================
 %% Plugin Callbacks
@@ -44,9 +36,6 @@ plugin_deps() ->
 %% that will be checked against service configuration. Entries passing will be
 %% updated on the configuration with their parsed values
 %% To debug, set api_server or {api_server, [nkpacket]} in the 'debug' config option
--spec plugin_syntax() ->
-	nklib_config:syntax().
-
 plugin_syntax() ->
     #{
         nkapi_server => {list,
@@ -61,14 +50,9 @@ plugin_syntax() ->
 
 
 %% @doc This function, if implemented, allows to add listening transports.
-%% By default start the web_server and api_server transports.
--spec plugin_listen(config(), nkservice:service()) ->
-	[{nkpacket:user_connection(), nkpacket:listen_opts()}].
-
 plugin_listen(Config, #{id:=SrvId}) ->
     Endpoints = maps:get(nkapi_server, Config, []),
-    lager:notice("NKLOG API LISTEN ~p", [Endpoints]),
-    Listen = nkapi_util:make_listen(SrvId, Endpoints),
-    lists:flatten(maps:values(Listen)).
-
+    L = nkapi_util:make_listen(SrvId, Endpoints),
+    lager:notice("NKLOG API LISTEN ~p", [L]),
+    L.
 

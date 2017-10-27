@@ -30,7 +30,6 @@
 -export_type([continue/0]).
 
 -type continue() :: continue | {continue, list()}.
--type config() :: nkapi:config().
 %%-type error_code() :: nkservice:error().
 
 -include_lib("nkpacket/include/nkpacket.hrl").
