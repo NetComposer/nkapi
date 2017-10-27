@@ -29,7 +29,7 @@
 -export([register/2, unregister/2]).
 -export([subscribe/2, unsubscribe/2]).
 -export([find_user/1, find_session/1, get_subscriptions/1]).
--export([transports/1, default_port/1]).
+-export([transports/1, default_port/1, resolve_opts/0]).
 -export([conn_init/1, conn_encode/2, conn_parse/3, conn_handle_call/4, 
          conn_handle_cast/3, conn_handle_info/3, conn_stop/3]).
 -export([get_all/0, get_all/1, print/3]).
@@ -297,6 +297,11 @@ default_port(ws) -> 9010;
 default_port(wss) -> 9011;
 default_port(http) -> 9010;
 default_port(https) -> 9011.
+
+
+%% @private
+resolve_opts() ->
+    #{resolve_type=>listen}.
 
 
 -spec conn_init(nkpacket:nkport()) ->
