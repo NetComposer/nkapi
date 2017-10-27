@@ -52,7 +52,5 @@ plugin_syntax() ->
 %% @doc This function, if implemented, allows to add listening transports.
 plugin_listen(Config, #{id:=SrvId}) ->
     Endpoints = maps:get(nkapi_server, Config, []),
-    L = nkapi_util:make_listen(SrvId, Endpoints),
-    lager:notice("NKLOG API LISTEN ~p", [L]),
-    L.
+    nkapi_util:make_listen(SrvId, Endpoints).
 
