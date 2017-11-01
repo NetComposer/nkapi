@@ -234,10 +234,8 @@ process_auth(HttpReq, #nkreq{srv_id=SrvId, api_id=Id}=Req) ->
     case ?CALL_SRV(SrvId, api_server_http_auth, [Id, HttpReq, Req]) of
         {true, UserId} ->
             {ok, Req#nkreq{user_id=UserId}};
-        {true, UserId, UserState} ->
-            {ok, Req#nkreq{user_id=UserId, user_state=UserState}};
-        {true, UserId, UserState, #nkreq{}=Req2} ->
-            {ok, Req2#nkreq{user_id=UserId, user_state=UserState}};
+        {true, UserId, #nkreq{}=Req2} ->
+            {ok, Req2#nkreq{user_id=UserId}};
         false ->
             throw({403, [], <<"User forbidden">>});
         {error, Error} ->

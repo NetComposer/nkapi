@@ -41,8 +41,11 @@ start() ->
     Spec = #{
         callback => ?MODULE,
         nkapi => #{
+        api_server_timeout => 300,
             id => test1,
+        %plugins => [nkapi_log_gelf],
             url => "wss:all:9010/_api/ws, https://all:9010/_api",
+        % To test nkpacket config:
             opts => #{idle_timeout => Timeout, debug=>true, tls_password => <<"1234">>, no_dns_cache=>true}
         },
         debug => [nkapi_server]
@@ -196,6 +199,7 @@ http_session_call(SessId) ->
             <<"data">> := #{<<"k">> := <<"v">>}
         }
     } =
+        http_cmd(session, <<>>, cmd,
         http_cmd(<<"session/cmd">>, #{session_id=>SessId, class=>class1, cmd=>cmd1, data=>#{k=>v}}),
     {ok,
         #{
@@ -206,6 +210,7 @@ http_session_call(SessId) ->
             }
         }
     } =
+        http_cmd(session, <<>>, cmd,
         http_cmd(<<"session/cmd">>, #{session_id=>SessId, class=>class2, cmd=>cmd1, data=>#{k=>v}}),
     ok.
 
@@ -213,6 +218,27 @@ http_session_call(SessId) ->
 http_log(Source, Msg, Data) ->
     http_cmd(<<"session/log">>, Data#{source=>Source, message=>Msg}).
 
+
+upload(File) ->
+    {ok, Bin} = file:read_file(File),
+    nkservice_util:http_upload(
+        "https://127.0.0.1:9010/rpc",
+        u1,
+        p1,
+        test,
+        my_obj_id,
+        File,
+        Bin).
+
+
+download(File) ->
+    nkservice_util:http_download(
+        "https://127.0.0.1:9010/rpc",
+        u1,
+        p1,
+        test,
+        my_obj_id,
+        File).
 
 
 get_client() ->
@@ -240,11 +266,15 @@ event(Pid, Data) ->
 
 
 http_cmd(Cmd, Data) ->
+    Opts = #{
     Auth = base64:encode(list_to_binary(["user1", ":", "1234"])),
+        pass => <<"1234">>,
     Hds = [{"Authorization", "Basic "++binary_to_list(Auth)}],
+            class => Class,
     Body = nklib_json:encode_pretty(#{
         cmd => Cmd,
         data => Data
+        }
     }),
     case httpc:request(post, {?HTTP, Hds, "application/json", Body}, [], []) of
         {ok, {{_, 200, _}, _Hs, Res}} ->
