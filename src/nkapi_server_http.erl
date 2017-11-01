@@ -305,9 +305,11 @@ wait_ack(Mon, #nkreq{tid=TId, unknown_fields=Unknown}=Req, HttpReq) ->
             wait_ack(Mon, Req, HttpReq);
         {'DOWN', Mon, process, _Pid, _Reason} ->
             send_msg_error(process_down, Req, HttpReq);
-        Other ->
-            ?LLOG(warning, "unexpected msg in wait_ack: ~p", [Other], Req),
-            wait_ack(Mon, Req, HttpReq)
+        nkpacket_stop ->
+            ok;
+         Other ->
+           ?LLOG(warning, "unexpected msg in wait_ack: ~p", [Other], Req),
+           wait_ack(Mon, Req, HttpReq)
     after
         1000*?MAX_ACK_TIME ->
             nklib_util:demonitor(Mon),
