@@ -233,10 +233,8 @@ process_auth(#nkreq{srv_id=SrvId}=Req, HttpReq) ->
     case SrvId:api_server_http_auth(Req, HttpReq) of
         {true, UserId} ->
             {ok, Req#nkreq{user_id=UserId}};
-        {true, UserId, UserState} ->
-            {ok, Req#nkreq{user_id=UserId, user_state=UserState}};
-        {true, UserId, UserState, #nkreq{}=Req2} ->
-            {ok, Req2#nkreq{user_id=UserId, user_state=UserState}};
+        {true, UserId, #nkreq{}=Req2} ->
+            {ok, Req2#nkreq{user_id=UserId}};
         false ->
             throw({403, [], <<"User forbidden">>});
         {error, Error} ->
