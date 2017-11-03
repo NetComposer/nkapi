@@ -199,7 +199,6 @@ http_session_call(SessId) ->
             <<"data">> := #{<<"k">> := <<"v">>}
         }
     } =
-        http_cmd(session, <<>>, cmd,
         http_cmd(<<"session/cmd">>, #{session_id=>SessId, class=>class1, cmd=>cmd1, data=>#{k=>v}}),
     {ok,
         #{
@@ -210,7 +209,6 @@ http_session_call(SessId) ->
             }
         }
     } =
-        http_cmd(session, <<>>, cmd,
         http_cmd(<<"session/cmd">>, #{session_id=>SessId, class=>class2, cmd=>cmd1, data=>#{k=>v}}),
     ok.
 
@@ -266,15 +264,11 @@ event(Pid, Data) ->
 
 
 http_cmd(Cmd, Data) ->
-    Opts = #{
     Auth = base64:encode(list_to_binary(["user1", ":", "1234"])),
-        pass => <<"1234">>,
     Hds = [{"Authorization", "Basic "++binary_to_list(Auth)}],
-            class => Class,
     Body = nklib_json:encode_pretty(#{
         cmd => Cmd,
         data => Data
-        }
     }),
     case httpc:request(post, {?HTTP, Hds, "application/json", Body}, [], []) of
         {ok, {{_, 200, _}, _Hs, Res}} ->
