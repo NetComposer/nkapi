@@ -86,15 +86,15 @@ make_listen_transps(SrvId, Id, [Conn|Rest], Opts, Acc) ->
             CowInit = [{srv_id, SrvId}, {id, Id}],
             Routes = [{'_', [{CowPath, nkapi_server_http, CowInit}]}],
             Opts3 = Opts2#{
-                class => {nkapi_server1, SrvId, Id},
+                class => {nkapi_server, SrvId, Id},
                 http_proto => {dispatch, #{routes => Routes}},
                 path => nklib_util:to_binary(Path1)
             },
             Conn#nkconn{protocol=nkpacket_protocol_http, opts=Opts3};
         Transp==ws; Transp==wss ->
             Opts3 = Opts2#{
-                path => maps:get(path, Opts, <<"/">>),
                 class => {nkapi_server, SrvId, Id},
+                path => maps:get(path, Opts2, <<"/">>),
                 get_headers => [<<"user-agent">>]
             },
             Conn#nkconn{opts=Opts3}

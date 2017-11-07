@@ -131,15 +131,14 @@ api_server_http_auth(_Id, _HttpReq, _Req) ->
 
 %% @doc
 service_api_syntax(_Id, SyntaxAcc, #nkreq{cmd=Cmd}=Req) ->
-    {nkapi_api_syntax:syntax(Cmd, SyntaxAcc), Req};
-
-service_api_syntax(_Id, _SyntaxAcc, _Req) ->
-    continue.
+    case nkapi_api_syntax:syntax(Cmd, SyntaxAcc) of
+        continue ->
+            continue;
+        Syntax ->
+            {Syntax, Req}
+    end.
 
 
 %% @doc
 service_api_cmd(_Id, #nkreq{cmd=Cmd}=Req) ->
-    nkapi_api_cmd:cmd(Cmd, Req);
-
-service_api_cmd(_Id, _Req) ->
-    continue.
+    nkapi_api_cmd:cmd(Cmd, Req).

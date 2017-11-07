@@ -160,9 +160,8 @@ cmd(<<"session/api_test.async">>, #nkreq{data=#{data:=Data}}=Req) ->
         end),
     {ack, Pid};
 
-cmd(Cmd, Req) ->
-    ?LLOG(notice, "command not implemented: ~s", [Cmd], Req),
-    {error, not_implemented}.
+cmd(_Cmd, _Req) ->
+    continue.
 
 
 %% ===================================================================

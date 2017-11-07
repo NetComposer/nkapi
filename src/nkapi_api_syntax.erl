@@ -93,8 +93,8 @@ syntax(<<"session/api_test.async">>, Syntax) ->
         '__mandatory' => [data]
     };
 
-syntax(_Cmd, Syntax) ->
-    Syntax.
+syntax(_Cmd, _Syntax) ->
+    continue.
 
 
 
