@@ -22,7 +22,7 @@
 -module(nkapi_client).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
--export([start/5, start/6, cmd/3, event/2, stop/1, stop_all/0]).
+-export([start/5, start/6, connect/4, cmd/3, event/2, stop/1, stop_all/0]).
 -export([reply_ok/3, reply_error/3]).
 -export([transports/1, default_port/1]).
 -export([conn_init/1, conn_encode/2, conn_parse/3, conn_stop/3]).
@@ -103,6 +103,34 @@ start(SrvId, Url, Login, Fun, UserData, Cmd) ->
         {error, Error} -> 
             {error, Error}
     end.
+
+
+
+%% @doc Starts a new session
+-spec connect(term(), binary(), function(), term()) ->
+    {ok, pid(), Reply::map()} | {error, term()}.
+
+connect(SrvId, Url, Fun, UserData) ->
+    Debug = case nkservice_util:get_debug_info(SrvId, ?MODULE) of
+        {true, #{nkpacket:=true}} -> true;
+        _ -> false
+    end,
+    ConnOpts = #{
+        protocol => nkapi_client,
+        class => {?MODULE, SrvId},
+        monitor => self(),
+        connect_timeout => 60000,
+        idle_timeout => ?WS_TIMEOUT,
+        user_state => {Fun, UserData},
+        debug => Debug
+    },
+    case nkpacket:connect(Url, ConnOpts) of
+        {ok, Pid} ->
+            {ok, Pid};
+        {error, Error} ->
+            {error, Error}
+    end.
+
 
 
 %% @doc 
