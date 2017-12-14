@@ -32,7 +32,7 @@
 -export([reply/2, get_qs/1, get_headers/1, get_basic_auth/1, get_peer/1]).
 -export([init/2, terminate/3]).
 
--define(MAX_BODY, 100000).
+-define(MAX_BODY, 50000000).
 -define(MAX_ACK_TIME, 180).
 
 -include("nkapi.hrl").
