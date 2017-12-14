@@ -280,8 +280,9 @@ get_body(Req) ->
                 _ ->
                     throw({400, [], <<"Invalid Content-Type">>})
             end;
-        _ ->
-            throw({[], <<"Body too large">>})
+        BL ->
+            lager:error("NKLOG Body is too large ~p", [BL]),
+            throw({500, [], <<"Body too large">>})
     end.
 
 
