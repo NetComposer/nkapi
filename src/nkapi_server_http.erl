@@ -210,19 +210,20 @@ init(HttpReq, [{srv_id, SrvId}, {id, Id}]) ->
             data = Data,
             timeout_pending = false
         },
+        Hdrs = ?CALL_SRV(SrvId, api_server_http_headers, [Id, HttpReq]),
         case process_auth(HttpReq, Req) of
             {ok, Req2} ->
-                process_req(HttpReq, Req2);
+                process_req(HttpReq, Hdrs, Req2);
             {error, Error} ->
-                send_msg_error(Error, Req, HttpReq)
+                send_msg_error(Error, Hdrs, Req, HttpReq)
         end
     catch
         throw:{options} ->
             case ?CALL_SRV(SrvId, api_server_http_options, [Id, HttpReq]) of
                 {ok, Code, Hds, Reply} ->
                     send_http_reply(Code, Hds, Reply, HttpReq);
-                {error, ErrorMsg} ->
-                    send_http_reply(400, [], ErrorMsg, HttpReq)
+                {error, Hds, ErrorMsg} ->
+                    send_http_reply(400, Hds, ErrorMsg, HttpReq)
             end;
         throw:{Code, Hds, Reply} ->
             send_http_reply(Code, Hds, Reply, HttpReq)
@@ -253,10 +254,10 @@ process_auth(HttpReq, #nkreq{srv_id=SrvId, api_id=Id}=Req) ->
 
 
 %% @private
-process_req(HttpReq, Req) ->
+process_req(HttpReq, Hdrs, Req) ->
     case nkservice_api:api(Req) of
         {ok, Reply, #nkreq{unknown_fields=Unknown}} ->
-            send_msg_ok(Reply, Unknown, HttpReq);
+            send_msg_ok(Reply, Hdrs, Unknown, HttpReq);
         {ack, Pid, #nkreq{}} ->
             Mon = case is_pid(Pid) of
                 true ->
@@ -264,9 +265,9 @@ process_req(HttpReq, Req) ->
                 false ->
                     undefined
             end,
-            wait_ack(Mon, Req, HttpReq);
+            wait_ack(Mon, Hdrs, Req, HttpReq);
         {error, Error, _UserState2} ->
-            send_msg_error(Error, Req, HttpReq)
+            send_msg_error(Error, Hdrs, Req, HttpReq)
     end.
 
 
@@ -296,39 +297,39 @@ get_body(Req) ->
 
 
 %% @private
-wait_ack(Mon, #nkreq{tid=TId, unknown_fields=Unknown}=Req, HttpReq) ->
+wait_ack(Mon, Hdrs, #nkreq{tid=TId, unknown_fields=Unknown}=Req, HttpReq) ->
     receive
         {nkapi_reply_ok, TId, Reply} ->
             nklib_util:demonitor(Mon),
-            send_msg_ok(Reply, Unknown, HttpReq);
+            send_msg_ok(Reply, Hdrs, Unknown, HttpReq);
         {nkapi_reply_error, TId, Error} ->
             nklib_util:demonitor(Mon),
-            send_msg_error(Error, Req, HttpReq);
+            send_msg_error(Error, Hdrs, Req, HttpReq);
         {nkapi_reply_login, TId, Reply, _UserId, _UserMeta} ->
             nklib_util:demonitor(Mon),
-            send_msg_ok(Reply, Unknown, HttpReq);
+            send_msg_ok(Reply, Hdrs, Unknown, HttpReq);
         {nkapi_reply_ack, TId, Pid} when is_pid(Pid) ->
             nklib_util:demonitor(Mon),
             Mon2 = monitor(process, Pid),
-            wait_ack(Mon2, Req, HttpReq);
+            wait_ack(Mon2, Hdrs, Req, HttpReq);
         {nkapi_reply_ack, TId, _} ->
-            wait_ack(Mon, Req, HttpReq);
+            wait_ack(Mon, Hdrs, Req, HttpReq);
         {'DOWN', Mon, process, _Pid, _Reason} ->
-            send_msg_error(process_down, Req, HttpReq);
+            send_msg_error(process_down, Hdrs, Req, HttpReq);
         nkpacket_stop ->
             ok;
          Other ->
            ?LLOG(warning, "unexpected msg in wait_ack: ~p", [Other], Req),
-           wait_ack(Mon, Req, HttpReq)
+           wait_ack(Mon, Hdrs, Req, HttpReq)
     after
         1000*?MAX_ACK_TIME ->
             nklib_util:demonitor(Mon),
-            send_msg_error(timeout, Req, HttpReq)
+            send_msg_error(timeout, Hdrs, Req, HttpReq)
     end.
 
 
 %% @private
-send_msg_ok(Reply, Unknown, HttpReq) ->
+send_msg_ok(Reply, Headers, Unknown, HttpReq) ->
     Msg1 = #{result=>ok},
     Msg2 = case Reply of
         #{} when map_size(Reply)==0 -> Msg1;
@@ -339,11 +340,11 @@ send_msg_ok(Reply, Unknown, HttpReq) ->
         [] -> Msg2;
         _ -> Msg2#{unknown_fields=>Unknown}
     end,
-    send_http_reply(200, [], Msg3, HttpReq).
+    send_http_reply(200, Headers, Msg3, HttpReq).
 
 
 %% @private
-send_msg_error(Error, #nkreq{srv_id=SrvId}, HttpReq) ->
+send_msg_error(Error, Headers, #nkreq{srv_id=SrvId}, HttpReq) ->
     {Code, Text} = nkservice_util:error(SrvId, Error),
     Msg = #{
         result => error,
@@ -352,7 +353,7 @@ send_msg_error(Error, #nkreq{srv_id=SrvId}, HttpReq) ->
             error => Text
         }
     },
-    send_http_reply(200, [], Msg, HttpReq).
+    send_http_reply(200, Headers, Msg, HttpReq).
 
 
 %% @private
