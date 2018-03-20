@@ -192,6 +192,7 @@ init(HttpReq, [{srv_id, SrvId}, {id, Id}]) ->
         end,
         case cowboy_req:method(HttpReq) of
             <<"POST">> -> ok;
+            <<"OPTIONS">> -> throw({options});
             _ -> throw({400, [], <<"Only POST is supported">>})
         end,
         {ok, Cmd, Data} = get_body(HttpReq),
@@ -215,8 +216,16 @@ init(HttpReq, [{srv_id, SrvId}, {id, Id}]) ->
             {error, Error} ->
                 send_msg_error(Error, Req, HttpReq)
         end
-    catch throw:{Code, Hds, Reply} ->
-        send_http_reply(Code, Hds, Reply, HttpReq)
+    catch
+        throw:{options} ->
+            case ?CALL_SRV(SrvId, api_server_http_options, [Id, HttpReq]) of
+                {ok, Code, Hds, Reply} ->
+                    send_http_reply(Code, Hds, Reply, HttpReq);
+                {error, ErrorMsg} ->
+                    send_http_reply(400, [], ErrorMsg, HttpReq)
+            end;
+        throw:{Code, Hds, Reply} ->
+            send_http_reply(Code, Hds, Reply, HttpReq)
     end.
 
 
