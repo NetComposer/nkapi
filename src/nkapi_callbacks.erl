@@ -25,7 +25,7 @@
 		 api_server_reg_down/4,
 		 api_server_handle_call/4, api_server_handle_cast/3,
 		 api_server_handle_info/3, api_server_code_change/4]).
--export([api_server_http_auth/3]).
+-export([api_server_http_auth/3, api_server_http_options/2]).
 -export([service_api_syntax/3,  service_api_cmd/2]).
 -export_type([continue/0]).
 
@@ -119,6 +119,13 @@ api_server_terminate(_Id, _Reason, State) ->
 
 api_server_http_auth(_Id, _HttpReq, _Req) ->
     false.
+
+-spec api_server_http_options(nkapi:id(), nkapi_server_http:http_req()) ->
+    {ok, Code::integer(), Headers::[binary()], Reply::binary()} |
+    {error, Error::binary()}.
+
+api_server_http_options(_Id, _HttpReq) ->
+    {error, <<"Only POST is supported">>}.
 
 
 
