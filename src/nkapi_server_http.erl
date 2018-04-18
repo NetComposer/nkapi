@@ -195,7 +195,7 @@ init(HttpReq, [{srv_id, SrvId}, {id, Id}]) ->
             <<"OPTIONS">> -> throw({options});
             _ -> throw({400, [], <<"Only POST is supported">>})
         end,
-        {ok, Cmd, Data} = get_body(HttpReq),
+        {ok, Cmd, Data, HttpReq2} = get_body(HttpReq),
         SessionId = nklib_util:luid(),
         Req = #nkreq{
             srv_id = SrvId,
@@ -210,12 +210,12 @@ init(HttpReq, [{srv_id, SrvId}, {id, Id}]) ->
             data = Data,
             timeout_pending = false
         },
-        Hdrs = ?CALL_SRV(SrvId, api_server_http_headers, [Id, HttpReq]),
-        case process_auth(HttpReq, Req) of
+        Hdrs = ?CALL_SRV(SrvId, api_server_http_headers, [Id, HttpReq2]),
+        case process_auth(HttpReq2, Req) of
             {ok, Req2} ->
-                process_req(HttpReq, Hdrs, Req2);
+                process_req(HttpReq2, Hdrs, Req2);
             {error, Error} ->
-                send_msg_error(Error, Hdrs, Req, HttpReq)
+                send_msg_error(Error, Hdrs, Req, HttpReq2)
         end
     catch
         throw:{options} ->
@@ -275,15 +275,15 @@ process_req(HttpReq, Hdrs, Req) ->
 get_body(Req) ->
     case cowboy_req:body_length(Req) of
         BL when is_integer(BL), BL =< ?MAX_BODY ->
-            {ok, Body, _} = cowboy_req:body(Req, [{length, infinity}]),
-            case cowboy_req:header(<<"content-type">>, Req) of
+            {ok, Body, Req2} = cowboy_req:body(Req, [{length, infinity}]),
+            case cowboy_req:header(<<"content-type">>, Req2) of
                 <<"application/json">> ->
                     case nklib_json:decode(Body) of
                         error ->
                             throw({400, [], <<"Invalid json">>});
                         #{<<"cmd">>:=Cmd}=Json ->
                             Data = maps:get(<<"data">>, Json, #{}),
-                            {ok, Cmd, Data};
+                            {ok, Cmd, Data, Req2};
                         _ ->
                             throw({400, <<"Invalid API body">>})
                     end;
