@@ -160,6 +160,10 @@ cmd(<<"session/api_test.async">>, #nkreq{data=#{data:=Data}}=Req) ->
         end),
     {ack, Pid};
 
+cmd(<<"service/config/put">>, #nkreq{data=#{service_id := ServiceId, key := Key, value := Value}, user_id = <<"admin">>}) ->
+    nklib_config:put(ServiceId, Key, Value),
+    {ok, #{}};
+
 cmd(_Cmd, _Req) ->
     continue.
 

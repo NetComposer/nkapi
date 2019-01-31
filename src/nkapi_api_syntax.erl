@@ -93,6 +93,15 @@ syntax(<<"session/api_test.async">>, Syntax) ->
         '__mandatory' => [data]
     };
 
+syntax(<<"service/config/put">>, Syntax) ->
+    Syntax#{
+        service_id => atom,
+        key => atom,
+        value => any,
+        '__mandatory' => [service_id, key, value]
+    };
+
+
 syntax(_Cmd, _Syntax) ->
     continue.
 
